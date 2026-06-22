@@ -1,0 +1,23 @@
+# Normalize text files.
+* text=auto
+
+# C# / documentation files
+*.cs text eol=crlf
+*.config text eol=crlf
+*.md text
+
+# Office and CAD files are binary.
+*.xlsx binary
+*.xls binary
+*.SLDPRT binary
+*.SLDASM binary
+*.SLDDRW binary
+*.sldprt binary
+*.sldasm binary
+*.slddrw binary
+
+# Images / videos are binary.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.mp4 binary

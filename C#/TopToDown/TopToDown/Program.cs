@@ -2,6 +2,7 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -9,202 +10,366 @@ namespace SwFeatureDebug
 {
     internal class Program
     {
-        // =========================
-        // 模块 0：用户配置区
-        // =========================
-        // 学习阶段建议只改这里：
-        // 1. MainFeed / Collector / Branch：三类铜排规格，单位 mm。
-        // 2. PhaseName：相别，例如 "A"、"B"、"C"。
-        // 3. Start/EndTerminalOffsetZSign：端子参考点到扫掠中心线的 Z 向偏移方向。
-        static readonly BusbarSettings Settings = new BusbarSettings
+        private static readonly BusbarSettings Settings = new BusbarSettings
         {
-            // 第一类：刀熔出线端到汇流排的转接排/主连接排。
+            ModelingMode = BusbarModelingMode.SheetMetalBaseFlangeOpenProfile,
             MainFeedWidthMm = 60.0,
             MainFeedThicknessMm = 6.0,
 
-            // 第二类：沿 X 方向布置的 ABC 汇流排。
             CollectorWidthMm = 80.0,
             CollectorThicknessMm = 6.0,
 
-            // 第三类：汇流排到漏保进线端的分支排。
             BranchWidthMm = 40.0,
             BranchThicknessMm = 4.0,
 
-            // 中心线相对参考点的 Z 向偏移方向。
-            // 刀熔端：B_OUT.Z + 厚度/2；漏保端：B_IN.Z - 厚度/2。
             StartTerminalOffsetZSign = 1,
             EndTerminalOffsetZSign = -1,
 
-            // 三相汇流排沿 Y 方向等间距排列，顺序为 A、B、C。
             CollectorPhaseSpacingMm = 60.0,
-
-            // A 相汇流排相对漏保进线点的 Y 向上方净距。
-            // B/C 相会在此基础上依次向下偏移 CollectorPhaseSpacingMm。
-            // 这里给 180mm：A=漏保上方180，B=120，C=60，便于后续分支排从上往下搭接。
             CollectorTopClearanceYMm = 180.0,
-
-            // 汇流排相对漏保输入点的 Z 向位置。
-            // 这里先给一套初始规则：汇流排中心线位于漏保输入点前方 120mm。
             CollectorOffsetFromLoubaoInZMm = 120.0,
 
             MainLeadOutYMm = 40.0,
-            BranchApproachYMm = 40.0,
 
-            // 主连接排与汇流排的搭接参数。
-            // 1. 主排先走到汇流排 Z 向前缘外侧：collector.Z + 铜排宽度/2 + FrontClearance。
-            // 2. 再沿 Y 到搭接层；Upper 表示搭在汇流排上端，Lower 表示搭在汇流排下端。
-            // 3. 最后按铜排宽度比例自动伸入，形成搭接，避免和汇流排中心线重合穿模。
             MainCollectorLapSide = CollectorLapSide.Upper,
+            BranchCollectorLapSide = CollectorLapSide.Upper,
+            SheetMetalBendRadiusMm = 5.0,
+            SheetMetalKFactor = 0.47,
+            SheetMetalFlangePosition = (int)swSweptFlangePositionTypes_e.swSweptFlangePositionType_BendOutside,
+            SheetMetalReverseDirection = false,
+            SheetMetalThickenDirection = false,
+            MainFeedSheetMetalWidthSide = SheetMetalWidthSide.Center,
+            CollectorSheetMetalWidthSide = SheetMetalWidthSide.Center,
+            BranchSheetMetalWidthSide = SheetMetalWidthSide.Center,
             MainCollectorFrontClearanceMm = 0.0,
-            MainCollectorLapDepthRatio = 0.5
+            MainCollectorLapDepthRatio = 0.5,
+            ReverseBranchOpenProfileSketchDirection = true
         };
 
-        static readonly string[] PhaseNames = { "A", "B", "C" };
-        static readonly string[] FuseComponentNameHints = { "fuse", "HR6", "熔", "刀熔", "隔离" };
-        static readonly string[] LoubaoComponentNameHints = { "loubao", "PGM", "漏保" };
-        const string DebugPhaseName = "B";
-        static readonly bool ReplaceExistingBusbar = true;
-        static readonly bool VerboseFeatureScan = false;
-        static readonly bool GenerateMainFeedRoutes = true;
-        static readonly bool GenerateCollectorRoutes = true;
-        static readonly bool GenerateBranchRoutes = false;
+        private static readonly string[] PhaseNames = { "A", "B", "C" };
+        private static readonly string[] FuseComponentNameHints = { "fuse", "HR6", "rong", "knife", "isolator" };
+        private static readonly string[] LoubaoComponentNameHints = { "loubao", "PGM", "leakage", "breaker" };
 
-        // =========================
-        // 模块 1：程序主流程
-        // =========================
-        // 主流程只负责串联步骤：
-        // 连接 SW -> 获取装配体 -> 扫描参考点 -> 生成中心线路径 -> 新建铜排零件 -> 插回装配体。
-        // 函数折叠后看这里：这是程序入口，按自动铜排生成的完整流程顺序执行。
+        private static bool _replaceExistingBusbar = true;
+        private static bool _verboseFeatureScan;
+        private static bool _generateMainFeedRoutes = true;
+        private static bool _generateCollectorRoutes = true;
+        private static bool _generateBranchRoutes = true;
+        private static bool _runSheetMetalOpenLineDemoOnly;
+        private static bool _runSheetMetalBentLineDemoOnly;
+        private static bool _runPlanningDemoV2Only;
+        private static bool _runPlanningDemoV2FromAssemblyOnly;
+        private static bool _runPreviewDemoV2FromAssemblyOnly;
+        private static bool _runSheetMetalV2FirstMainFromAssemblyOnly;
+
         [STAThread]
-        static void Main()
+        private static void Main(string[] args)
         {
             try
             {
-                var swApp = GetOrStartSolidWorks();
-                var model = swApp.ActiveDoc as ModelDoc2;
+                ConfigureFromArgs(args ?? new string[0]);
 
-                if (model == null)
-                    throw new Exception("请先打开 SolidWorks，并打开目标装配体。");
-
-                if (model.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
-                    throw new Exception("当前活动文档不是装配体。");
-
-                var asm = (AssemblyDoc)model;
-                var foundPoints = new List<FoundPoint>();
-
-                // 重复调试时，先删除上一根程序生成的同相铜排，避免新旧模型叠在一起误判。
-                if (ReplaceExistingBusbar)
-                    DeleteExistingBusbarComponents(model, asm);
-
-                Console.WriteLine("当前装配体：" + model.GetTitle());
-                Console.WriteLine();
-
-                if (VerboseFeatureScan)
-                    Console.WriteLine("===== Assembly features =====");
-                // 先扫描装配体自身特征，再扫描每个零件组件的特征。
-                // 参考点位于零件组件里时，需要用组件 Transform2 转成装配体坐标。
-                DumpModelFeatures(swApp, model, null, null, foundPoints);
-
-                Console.WriteLine();
-                if (VerboseFeatureScan)
-                    Console.WriteLine("===== Component features =====");
-
-                object[] comps = asm.GetComponents(false) as object[];
-                if (comps == null || comps.Length == 0)
+                if (_runPlanningDemoV2Only)
                 {
-                    Console.WriteLine("未找到组件。");
+                    BusbarPlanningDemoV2.Run();
+                    Console.WriteLine();
+                    Console.WriteLine("Busbar V2 planning demo complete. Press any key to exit.");
+                    if (!Console.IsInputRedirected)
+                        Console.ReadKey();
                     return;
                 }
 
-                foreach (object obj in comps)
+                SldWorks swApp = GetOrStartSolidWorks();
+                ModelDoc2 model = GetActiveOrOpenAssembly(swApp);
+                AssemblyDoc assembly = (AssemblyDoc)model;
+
+                if (_runPlanningDemoV2FromAssemblyOnly)
                 {
-                    var comp = obj as Component2;
-                    if (comp == null) continue;
-
-                    var compModel = comp.GetModelDoc2() as ModelDoc2;
-                    if (compModel == null)
-                    {
-                        Console.WriteLine("[跳过] 组件未加载或轻化：" + comp.Name2);
-                        continue;
-                    }
-
-                    if (VerboseFeatureScan)
-                    {
-                        Console.WriteLine();
-                        Console.WriteLine("Component: " + comp.Name2);
-                    }
-                    DumpModelFeatures(swApp, compModel, comp.Name2, comp.Transform2, foundPoints);
+                    List<FoundPoint> scannedPoints = ScanReferencePoints(swApp, model, assembly);
+                    BusbarPlanningDemoV2.RunFromScannedAssembly(scannedPoints, PhaseNames, Settings);
+                    Console.WriteLine();
+                    Console.WriteLine("Busbar V2 assembly planning demo complete. Press any key to exit.");
+                    if (!Console.IsInputRedirected)
+                        Console.ReadKey();
+                    return;
                 }
 
-                Console.WriteLine();
-                // 根据自动识别到的 A/B/C_OUT 和多个漏保 A/B/C_IN，生成主排、汇流排、分支排三类路径。
+                if (_runPreviewDemoV2FromAssemblyOnly)
+                {
+                    List<FoundPoint> scannedPoints = ScanReferencePoints(swApp, model, assembly);
+                    BusbarPlanV2 plan = BusbarPlanningDemoV2.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, Settings);
+                    CreateBusbarV2PreviewPart(swApp, model, assembly, plan);
+                    Console.WriteLine();
+                    Console.WriteLine("Busbar V2 assembly preview complete. Press any key to exit.");
+                    if (!Console.IsInputRedirected)
+                        Console.ReadKey();
+                    return;
+                }
+
+                if (_runSheetMetalV2FirstMainFromAssemblyOnly)
+                {
+                    List<FoundPoint> scannedPoints = ScanReferencePoints(swApp, model, assembly);
+                    BusbarPlanV2 plan = BusbarPlanningDemoV2.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, Settings);
+                    BusbarV2 busbar = plan.Busbars.FirstOrDefault(b => b.Kind == BusbarKind.MainFeed);
+                    if (busbar == null)
+                        throw new Exception("No V2 main-feed busbar was planned from the active assembly.");
+
+                    CreateBusbarV2SheetMetalPart(swApp, model, assembly, busbar);
+                    Console.WriteLine();
+                    Console.WriteLine("Busbar V2 first main-feed sheet metal test complete. Press any key to exit.");
+                    if (!Console.IsInputRedirected)
+                        Console.ReadKey();
+                    return;
+                }
+
+                if (_runSheetMetalOpenLineDemoOnly)
+                {
+                    RunSheetMetalOpenLineDemo(swApp, model, assembly);
+                    Console.WriteLine();
+                    Console.WriteLine("Open-line sheet metal demo complete. Press any key to exit.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                if (_runSheetMetalBentLineDemoOnly)
+                {
+                    RunSheetMetalBentLineDemo(swApp, model, assembly);
+                    Console.WriteLine();
+                    Console.WriteLine("Bent-line sheet metal demo complete. Press any key to exit.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                if (_replaceExistingBusbar)
+                    DeleteExistingBusbarComponents(model, assembly);
+
+                List<FoundPoint> foundPoints = ScanReferencePoints(swApp, model, assembly);
                 List<BusbarRoute> routes = BuildComplexRoutes(foundPoints);
 
                 foreach (BusbarRoute route in routes)
-                    CreateBusbarSolidPart(swApp, model, asm, route);
+                    CreateBusbarSolidPart(swApp, model, assembly, route);
 
                 Console.WriteLine();
-                Console.WriteLine("扫描完成。按任意键退出。");
+                Console.WriteLine("Generation complete. Press any key to exit.");
                 Console.ReadKey();
             }
             catch (Exception ex)
             {
-                Console.WriteLine("错误：" + ex.Message);
+                Console.WriteLine("Error: " + ex.Message);
                 Console.WriteLine();
                 Console.WriteLine(ex);
                 Console.ReadKey();
             }
         }
 
-        // 连接已经打开的 SolidWorks；如果没找到运行中的 SW，则尝试启动一个新实例。
-        static SldWorks GetOrStartSolidWorks()
+        private static ModelDoc2 GetActiveOrOpenAssembly(SldWorks swApp)
+        {
+            ModelDoc2 model = swApp.ActiveDoc as ModelDoc2;
+            if (model != null && model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
+                return model;
+
+            object[] documents = swApp.GetDocuments() as object[];
+            if (documents != null)
+            {
+                foreach (object item in documents)
+                {
+                    ModelDoc2 openModel = item as ModelDoc2;
+                    if (openModel == null || openModel.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
+                        continue;
+
+                    Console.WriteLine("Active document is not an assembly. Switching to open assembly: " + openModel.GetTitle());
+                    ActivateDocument(swApp, openModel);
+                    return openModel;
+                }
+            }
+
+            throw new Exception("Open SolidWorks and activate a target assembly first.");
+        }
+
+        private static void ConfigureFromArgs(string[] args)
+        {
+            foreach (string arg in args)
+            {
+                if (SameText(arg, "--verbose"))
+                {
+                    _verboseFeatureScan = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--keep-existing"))
+                {
+                    _replaceExistingBusbar = false;
+                    continue;
+                }
+
+                if (SameText(arg, "--branch"))
+                {
+                    _generateBranchRoutes = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--demo-open-line"))
+                {
+                    _runSheetMetalOpenLineDemoOnly = true;
+                    _runSheetMetalBentLineDemoOnly = false;
+                    continue;
+                }
+
+                if (SameText(arg, "--demo-bent-line"))
+                {
+                    _runSheetMetalBentLineDemoOnly = true;
+                    _runSheetMetalOpenLineDemoOnly = false;
+                    continue;
+                }
+
+                if (SameText(arg, "--plan-v2-demo"))
+                {
+                    _runPlanningDemoV2Only = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--plan-v2-assembly"))
+                {
+                    _runPlanningDemoV2FromAssemblyOnly = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--preview-v2-assembly"))
+                {
+                    _runPreviewDemoV2FromAssemblyOnly = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--sheetmetal-v2-first-main"))
+                {
+                    _runSheetMetalV2FirstMainFromAssemblyOnly = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--open-profile"))
+                {
+                    Settings.ModelingMode = BusbarModelingMode.SheetMetalBaseFlangeOpenProfile;
+                    continue;
+                }
+
+                if (SameText(arg, "--swept-flange"))
+                {
+                    Settings.ModelingMode = BusbarModelingMode.SheetMetalSweptFlange;
+                    continue;
+                }
+
+                if (SameText(arg, "--no-branch"))
+                {
+                    _generateBranchRoutes = false;
+                    continue;
+                }
+
+                if (SameText(arg, "--no-main"))
+                {
+                    _generateMainFeedRoutes = false;
+                    continue;
+                }
+
+                if (SameText(arg, "--no-collector"))
+                {
+                    _generateCollectorRoutes = false;
+                    continue;
+                }
+            }
+        }
+
+        private static SldWorks GetOrStartSolidWorks()
         {
             try
             {
-                // 优先连接已经打开的 SolidWorks。调试 API 时推荐先手动打开 SW 和目标装配体。
-                Console.WriteLine("正在连接已打开的 SolidWorks...");
+                Console.WriteLine("Connecting to running SolidWorks...");
                 return (SldWorks)Marshal.GetActiveObject("SldWorks.Application");
             }
             catch (COMException)
             {
-                // 如果没有打开 SW，就启动一个新的实例。启动后仍需要用户打开目标装配体。
-                Console.WriteLine("没有从 COM 中找到已运行的 SolidWorks，尝试启动新的 SolidWorks...");
+                Console.WriteLine("No running SolidWorks instance found. Starting SolidWorks...");
 
                 Type swType = Type.GetTypeFromProgID("SldWorks.Application");
                 if (swType == null)
-                    throw new Exception("本机没有注册 SolidWorks.Application，请确认 SolidWorks 已正确安装。");
+                    throw new Exception("SolidWorks.Application is not registered on this computer.");
 
-                var swApp = (SldWorks)Activator.CreateInstance(swType);
+                SldWorks swApp = (SldWorks)Activator.CreateInstance(swType);
                 swApp.Visible = true;
                 return swApp;
             }
         }
 
-        // 删除装配体中上一轮由本程序生成的同相铜排，避免调试时新旧铜排叠在一起。
-        static void DeleteExistingBusbarComponents(ModelDoc2 model, AssemblyDoc asm)
+        private static List<FoundPoint> ScanReferencePoints(SldWorks swApp, ModelDoc2 model, AssemblyDoc assembly)
         {
-            // 只删除本程序生成的同相铜排组件，匹配前缀如 Busbar_B_。
-            // 注意：这里只从装配体里移除组件，不删除磁盘上的 .SLDPRT 文件。
-            string prefix = "Busbar_";
-            object[] comps = asm.GetComponents(false) as object[];
+            List<FoundPoint> foundPoints = new List<FoundPoint>();
 
-            if (comps == null || comps.Length == 0)
+            Console.WriteLine("Current assembly: " + model.GetTitle());
+            Console.WriteLine();
+
+            if (_verboseFeatureScan)
+                Console.WriteLine("===== Assembly features =====");
+
+            DumpModelFeatures(swApp, model, null, null, foundPoints);
+
+            object[] components = assembly.GetComponents(false) as object[];
+            if (components == null || components.Length == 0)
+            {
+                Console.WriteLine("No assembly components found.");
+                return foundPoints;
+            }
+
+            if (_verboseFeatureScan)
+            {
+                Console.WriteLine();
+                Console.WriteLine("===== Component features =====");
+            }
+
+            foreach (object item in components)
+            {
+                Component2 component = item as Component2;
+                if (component == null)
+                    continue;
+
+                ModelDoc2 componentModel = component.GetModelDoc2() as ModelDoc2;
+                if (componentModel == null)
+                {
+                    Console.WriteLine("[Skip] Component is unloaded or lightweight: " + component.Name2);
+                    continue;
+                }
+
+                if (_verboseFeatureScan)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Component: " + component.Name2);
+                }
+
+                DumpModelFeatures(swApp, componentModel, component.Name2, component.Transform2, foundPoints);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Reference point count: " + foundPoints.Count);
+            return foundPoints;
+        }
+
+        private static void DeleteExistingBusbarComponents(ModelDoc2 model, AssemblyDoc assembly)
+        {
+            object[] components = assembly.GetComponents(false) as object[];
+            if (components == null || components.Length == 0)
                 return;
 
             model.ClearSelection2(true);
 
             int selectedCount = 0;
-
-            foreach (object obj in comps)
+            foreach (object item in components)
             {
-                Component2 comp = obj as Component2;
-                if (comp == null)
+                Component2 component = item as Component2;
+                if (component == null || component.Name2 == null)
                     continue;
 
-                if (comp.Name2 != null && comp.Name2.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                if (component.Name2.StartsWith("Busbar_", StringComparison.OrdinalIgnoreCase) &&
+                    component.Select4(true, null, false))
                 {
-                    if (comp.Select4(true, null, false))
-                        selectedCount++;
+                    selectedCount++;
                 }
             }
 
@@ -218,101 +383,88 @@ namespace SwFeatureDebug
             model.ClearSelection2(true);
         }
 
-        // 遍历一个文档的 FeatureManager 设计树，把其中的 RefPoint 识别出来。
-        // compTransform 不为空时，说明当前扫描的是零件组件，需要把零件坐标转成装配体坐标。
-        static void DumpModelFeatures(SldWorks swApp, ModelDoc2 model, string compName, MathTransform compTransform, List<FoundPoint> foundPoints)
+        private static void DumpModelFeatures(SldWorks swApp, ModelDoc2 model, string componentName, MathTransform componentTransform, List<FoundPoint> foundPoints)
         {
-            // 遍历 FeatureManager 设计树。
-            // 本项目需要的是 RefPoint 特征，例如 A_IN、B_OUT、B_IN。
-            Feature feat = model.FirstFeature() as Feature;
+            Feature feature = model.FirstFeature() as Feature;
 
-            while (feat != null)
+            while (feature != null)
             {
-                string featName = feat.Name;
-                string featType = feat.GetTypeName2();
+                string featureName = feature.Name;
+                string featureType = feature.GetTypeName2();
 
-                if (VerboseFeatureScan)
-                    Console.WriteLine($"Feature: {featName}    Type: {featType}");
+                if (_verboseFeatureScan)
+                    Console.WriteLine("Feature: " + featureName + "    Type: " + featureType);
 
-                TryPrintReferencePoint(swApp, feat, compName, compTransform, foundPoints);
-
-                feat = feat.GetNextFeature() as Feature;
+                TryReadReferencePoint(swApp, feature, componentName, componentTransform, foundPoints);
+                feature = feature.GetNextFeature() as Feature;
             }
         }
 
-        // 尝试把一个通用 Feature 当成参考点读取；不是 RefPoint 就直接跳过。
-        // 成功后会保存为 FoundPoint，坐标统一为装配体全局坐标。
-        static void TryPrintReferencePoint(SldWorks swApp, Feature feat, string compName, MathTransform compTransform, List<FoundPoint> foundPoints)
+        private static void TryReadReferencePoint(SldWorks swApp, Feature feature, string componentName, MathTransform componentTransform, List<FoundPoint> foundPoints)
         {
-            // Feature.GetSpecificFeature2() 可以把通用 Feature 转成具体 API 对象。
-            // 如果它是 RefPoint，就读取点坐标；如果不是，直接跳过。
-            object specific = null;
-
+            object specific;
             try
             {
-                specific = feat.GetSpecificFeature2();
+                specific = feature.GetSpecificFeature2();
             }
             catch
             {
                 return;
             }
 
-            var refPoint = specific as RefPoint;
+            RefPoint refPoint = specific as RefPoint;
             if (refPoint == null)
                 return;
 
             MathPoint localMathPoint = refPoint.GetRefPoint();
             double[] local = localMathPoint.ArrayData as double[];
-
             if (local == null || local.Length < 3)
                 return;
 
-            double x = local[0];
-            double y = local[1];
-            double z = local[2];
+            Point3 point = new Point3(local[0], local[1], local[2]);
 
-            if (compTransform != null)
-            {
-                // 零件内部坐标 -> 装配体全局坐标。
-                // 这是二次开发最容易错的地方之一：零件点不能直接拿来当装配体点用。
-                var mu = (MathUtility)swApp.GetMathUtility();
-                var p = (MathPoint)mu.CreatePoint(new double[] { x, y, z });
-                var asmPoint = (MathPoint)p.MultiplyTransform(compTransform);
-                double[] asm = asmPoint.ArrayData as double[];
+            if (componentTransform != null)
+                point = TransformPoint(swApp, point, componentTransform);
 
-                x = asm[0];
-                y = asm[1];
-                z = asm[2];
-            }
+            string owner = string.IsNullOrWhiteSpace(componentName) ? "Assembly" : componentName;
 
-            Console.WriteLine("  >>> 找到参考点：" + feat.Name);
-            Console.WriteLine("      所属组件：" + (compName ?? "装配体自身"));
-            Console.WriteLine($"      装配体坐标：X={x * 1000:F3} mm, Y={y * 1000:F3} mm, Z={z * 1000:F3} mm");
+            Console.WriteLine("  >>> Reference point: " + feature.Name);
+            Console.WriteLine("      Owner: " + owner);
+            Console.WriteLine("      Assembly position: " + point.ToMillimeterText());
 
             foundPoints.Add(new FoundPoint
             {
-                ComponentName = compName ?? "装配体自身",
-                PointName = feat.Name,
-                Position = new Point3(x, y, z)
+                ComponentName = owner,
+                PointName = feature.Name,
+                Position = point
             });
         }
 
-        // 真实配电箱第一版拓扑生成入口：
-        // 1. 自动识别刀熔组件：同时拥有 A_OUT/B_OUT/C_OUT 的组件。
-        // 2. 自动识别漏保组件：同时拥有 A_IN/B_IN/C_IN，且不是刀熔的组件。
-        // 3. 按 X 坐标排序漏保。
-        // 4. 对 A/B/C 三相分别生成：主连接排、汇流排、三个分支排。
-        static List<BusbarRoute> BuildComplexRoutes(List<FoundPoint> foundPoints)
+        private static Point3 TransformPoint(SldWorks swApp, Point3 point, MathTransform transform)
+        {
+            MathUtility utility = (MathUtility)swApp.GetMathUtility();
+            MathPoint mathPoint = (MathPoint)utility.CreatePoint(new[] { point.X, point.Y, point.Z });
+            MathPoint transformed = (MathPoint)mathPoint.MultiplyTransform(transform);
+            double[] data = transformed.ArrayData as double[];
+
+            if (data == null || data.Length < 3)
+                throw new Exception("Failed to transform component point into assembly coordinates.");
+
+            return new Point3(data[0], data[1], data[2]);
+        }
+
+        private static List<BusbarRoute> BuildComplexRoutes(List<FoundPoint> foundPoints)
         {
             string fuseComponent = FindFuseComponent(foundPoints);
             List<LoubaoGroup> loubaos = FindLoubaoGroups(foundPoints, fuseComponent);
 
             if (loubaos.Count == 0)
-                throw new Exception("未识别到漏保组件。请确认漏保上存在 A_IN/B_IN/C_IN 命名参考点。");
+                throw new Exception("No leakage breaker component was found. Expected A_IN/B_IN/C_IN reference points.");
 
-            Console.WriteLine("===== complex busbar topology =====");
+            Console.WriteLine("===== Busbar topology =====");
             Console.WriteLine("Fuse component: " + fuseComponent);
-            Console.WriteLine("Loubao count: " + loubaos.Count);
+            Console.WriteLine("Leakage breaker count: " + loubaos.Count);
+
             foreach (LoubaoGroup loubao in loubaos)
                 Console.WriteLine("  Loubao: " + loubao.ComponentName + " centerX=" + ToMm(loubao.CenterX).ToString("F3") + " mm");
 
@@ -328,13 +480,13 @@ namespace SwFeatureDebug
 
                 CollectorLayout collector = BuildCollectorLayout(phase, fuseOut, loubaoInputs);
 
-                if (GenerateMainFeedRoutes)
+                if (_generateMainFeedRoutes)
                     routes.Add(BuildMainFeedRoute(phase, fuseOut, collector));
 
-                if (GenerateCollectorRoutes)
+                if (_generateCollectorRoutes)
                     routes.Add(BuildCollectorRoute(phase, collector));
 
-                if (GenerateBranchRoutes)
+                if (_generateBranchRoutes)
                 {
                     for (int i = 0; i < loubaoInputs.Count; i++)
                         routes.Add(BuildBranchRoute(phase, i + 1, loubaoInputs[i], collector));
@@ -348,8 +500,7 @@ namespace SwFeatureDebug
             return routes;
         }
 
-        // 自动识别刀熔组件：它应该同时拥有 A_OUT/B_OUT/C_OUT。
-        static string FindFuseComponent(List<FoundPoint> foundPoints)
+        private static string FindFuseComponent(List<FoundPoint> foundPoints)
         {
             var candidates = foundPoints
                 .GroupBy(p => p.ComponentName)
@@ -367,18 +518,17 @@ namespace SwFeatureDebug
                 .ToList();
 
             Console.WriteLine("Fuse candidates:");
-            foreach (var c in candidates)
-                Console.WriteLine("  " + c.ComponentName + " out=" + c.OutCount + " in=" + c.InCount + " nameScore=" + c.NameScore);
+            foreach (var candidate in candidates)
+                Console.WriteLine("  " + candidate.ComponentName + " out=" + candidate.OutCount + " in=" + candidate.InCount + " nameScore=" + candidate.NameScore);
 
             var fuse = candidates.FirstOrDefault();
             if (fuse == null)
-                throw new Exception("未识别到刀熔组件。请确认刀熔上存在 A_OUT/B_OUT/C_OUT 命名参考点。");
+                throw new Exception("No fuse component was found. Expected A_OUT/B_OUT/C_OUT reference points.");
 
             return fuse.ComponentName;
         }
 
-        // 自动识别漏保组件：不是刀熔，并且同时拥有 A_IN/B_IN/C_IN。
-        static List<LoubaoGroup> FindLoubaoGroups(List<FoundPoint> foundPoints, string fuseComponent)
+        private static List<LoubaoGroup> FindLoubaoGroups(List<FoundPoint> foundPoints, string fuseComponent)
         {
             return foundPoints
                 .GroupBy(p => p.ComponentName)
@@ -394,15 +544,11 @@ namespace SwFeatureDebug
                 .ToList();
         }
 
-        // 根据当前相、刀熔出线点和所有漏保进线点，计算该相汇流排的中心线层级。
-        // X 范围来自该相所有连接点；Y 层级按 A/B/C 等间距排列；Z 位置按漏保输入点向前偏移。
-        // 注意：汇流排高度不要再复用 BranchApproachY。
-        // BranchApproachY 是分支排接近漏保端子的短距离，CollectorTopClearanceY 才是整组三相汇流排的安装高度。
-        static CollectorLayout BuildCollectorLayout(string phase, FoundPoint fuseOut, List<FoundPoint> loubaoInputs)
+        private static CollectorLayout BuildCollectorLayout(string phase, FoundPoint fuseOut, List<FoundPoint> loubaoInputs)
         {
             int phaseIndex = Array.IndexOf(PhaseNames, phase);
             if (phaseIndex < 0)
-                throw new Exception("未知相别：" + phase);
+                throw new Exception("Unknown phase: " + phase);
 
             double baseY = loubaoInputs.Max(p => p.Position.Y) + Settings.CollectorTopClearanceY;
             double collectorY = baseY - phaseIndex * Settings.CollectorPhaseSpacing;
@@ -414,33 +560,18 @@ namespace SwFeatureDebug
 
             return new CollectorLayout
             {
-                Phase = phase,
                 Y = collectorY,
                 Z = collectorZ,
                 StartX = minX - endExtend,
-                EndX = maxX + endExtend,
-                MainTapX = fuseOut.Position.X
+                EndX = maxX + endExtend
             };
         }
 
-        // 生成第一类：刀熔出线端到汇流排的主连接排。
-        // 当前规则：从刀熔 OUT 点半厚度偏移后出发，Y 负方向让位，再到汇流排附近。
-        // 关键修正：汇流排沿 X 方向时，宽度铺在 Z 方向，所以主排不能直接走到 collector.Z。
-        // 路径先停在“汇流排前缘外侧”：collector.Z + 宽度/2 + 余量；
-        // 再沿 Y 到搭接层，最后沿 Z 负方向伸入一段搭接深度，形成搭接而不是穿模。
-        static BusbarRoute BuildMainFeedRoute(string phase, FoundPoint fuseOut, CollectorLayout collector)
+        private static BusbarRoute BuildMainFeedRoute(string phase, FoundPoint fuseOut, CollectorLayout collector)
         {
             BusbarProfile profile = Settings.GetProfile(BusbarKind.MainFeed);
-            Point3 start = OffsetTerminalCenter(fuseOut.Position, Settings.StartTerminalOffsetZSign, profile);
+            Point3 start = GetMainFeedTerminalRoutePoint(fuseOut.Position, profile, "Fuse " + phase + "_OUT");
             MainCollectorLapLayout lap = CalculateMainCollectorLap(collector);
-
-            Console.WriteLine(
-                "Main feed lap " + phase +
-                " [" + Settings.MainCollectorLapSide + "]" +
-                ": Y=" + ToMm(lap.Y).ToString("F3") +
-                " mm, frontZ=" + ToMm(lap.FrontZ).ToString("F3") +
-                " mm, endZ=" + ToMm(lap.EndZ).ToString("F3") +
-                " mm, depth=" + ToMm(lap.Depth).ToString("F3") + " mm");
 
             List<Point3> path = new List<Point3>();
             AddPathPoint(path, start);
@@ -452,40 +583,53 @@ namespace SwFeatureDebug
             return new BusbarRoute
             {
                 Name = "Busbar_" + phase + "_MainFeed",
-                Phase = phase,
                 Kind = BusbarKind.MainFeed,
                 Profile = profile,
                 CenterlinePoints = path
             };
         }
 
-        // 计算主连接排与汇流排的搭接位置。
-        // 所有 Z 向搭接值都由汇流排截面自动推导：
-        // - 汇流排沿 X 方向时，宽度铺在 Z 方向，所以前缘是 collector.Z + BusbarWidth/2。
-        // - 搭接深度 = BusbarWidth * MainCollectorLapDepthRatio。
-        // - 搭接终点不会越过汇流排中心线，避免主排扫掠中心线插入汇流排内部过深。
-        static MainCollectorLapLayout CalculateMainCollectorLap(CollectorLayout collector)
+        private static MainCollectorLapLayout CalculateMainCollectorLap(CollectorLayout collector)
+        {
+            if (Settings.ModelingMode == BusbarModelingMode.SheetMetalBaseFlangeOpenProfile)
+                return CalculateSheetMetalMainCollectorLap(collector);
+
+            BusbarProfile collectorProfile = Settings.CollectorProfile;
+            double frontZ = collector.Z + Settings.GetCollectorFrontZOffset();
+            double requestedDepth = Settings.GetMainCollectorLapDepth();
+            double maxDepthToCenter = collectorProfile.Width / 2.0;
+            double lapDepth = Math.Min(requestedDepth, maxDepthToCenter);
+
+            return new MainCollectorLapLayout
+            {
+                Y = collector.Y + Settings.GetMainCollectorLapYOffset(),
+                FrontZ = frontZ,
+                EndZ = frontZ - lapDepth
+            };
+        }
+
+        private static MainCollectorLapLayout CalculateSheetMetalMainCollectorLap(CollectorLayout collector)
         {
             BusbarProfile mainProfile = Settings.MainFeedProfile;
             BusbarProfile collectorProfile = Settings.CollectorProfile;
 
-            double frontZ = collector.Z + Settings.GetCollectorFrontZOffset();
-            double maxDepthToCenter = collectorProfile.Width / 2.0;
+            double collectorFrontZ = collector.Z + collectorProfile.Width / 2.0;
+            double frontZ = collectorFrontZ + mainProfile.Width / 2.0 + Settings.MainCollectorFrontClearance;
             double requestedDepth = Settings.GetMainCollectorLapDepth();
-            double lapDepth = Math.Min(requestedDepth, maxDepthToCenter);
-            double yOffset = Settings.GetMainCollectorLapYOffset();
+            double lapDepth = Math.Min(requestedDepth, collectorProfile.Width / 2.0);
+            double yOffset = Settings.MainCollectorLapSide == CollectorLapSide.Upper
+                ? mainProfile.Thickness
+                : -collectorProfile.Thickness;
 
             return new MainCollectorLapLayout
             {
                 Y = collector.Y + yOffset,
                 FrontZ = frontZ,
-                EndZ = frontZ - lapDepth,
-                Depth = lapDepth
+                EndZ = collectorFrontZ - lapDepth
             };
         }
 
-        // 生成第二类：沿 X 方向布置的汇流排。
-        static BusbarRoute BuildCollectorRoute(string phase, CollectorLayout collector)
+        private static BusbarRoute BuildCollectorRoute(string phase, CollectorLayout collector)
         {
             BusbarProfile profile = Settings.GetProfile(BusbarKind.Collector);
 
@@ -496,55 +640,96 @@ namespace SwFeatureDebug
             return new BusbarRoute
             {
                 Name = "Busbar_" + phase + "_Collector",
-                Phase = phase,
                 Kind = BusbarKind.Collector,
                 Profile = profile,
                 CenterlinePoints = path
             };
         }
 
-        // 生成第三类：汇流排到某个漏保进线端的分支排。
-        // 当前规则：从汇流排对应 X 位置下接，沿 Z 负方向到漏保端子前方，再沿 Y 负方向进入端子中心线终点。
-        static BusbarRoute BuildBranchRoute(string phase, int branchIndex, FoundPoint loubaoIn, CollectorLayout collector)
+        private static BusbarRoute BuildBranchRoute(string phase, int branchIndex, FoundPoint loubaoIn, CollectorLayout collector)
         {
             BusbarProfile profile = Settings.GetProfile(BusbarKind.Branch);
-            Point3 end = OffsetTerminalCenter(loubaoIn.Position, Settings.EndTerminalOffsetZSign, profile);
+            Point3 start = GetTerminalRoutePoint(loubaoIn.Position, Settings.EndTerminalOffsetZSign, profile, "Loubao " + phase + "_IN");
+            double lapY = CalculateBranchCollectorLapY(collector, profile);
 
             List<Point3> path = new List<Point3>();
-            AddPathPoint(path, new Point3(end.X, collector.Y, collector.Z));
-            AddPathPoint(path, new Point3(end.X, collector.Y, end.Z));
-            AddPathPoint(path, new Point3(end.X, end.Y + Settings.BranchApproachY, end.Z));
-            AddPathPoint(path, end);
+            AddPathPoint(path, start);
+            AddPathPoint(path, new Point3(start.X, lapY, start.Z));
+            AddPathPoint(path, new Point3(start.X, lapY, collector.Z));
 
             return new BusbarRoute
             {
                 Name = "Busbar_" + phase + "_Branch_" + branchIndex,
-                Phase = phase,
                 Kind = BusbarKind.Branch,
                 Profile = profile,
                 CenterlinePoints = path
             };
         }
 
-        // 把端子表面参考点转换为铜排扫掠中心线点，偏移距离为该类铜排厚度的一半。
-        static Point3 OffsetTerminalCenter(Point3 reference, int zSign, BusbarProfile profile)
+        private static double CalculateBranchCollectorLapY(CollectorLayout collector, BusbarProfile branchProfile)
+        {
+            if (Settings.ModelingMode != BusbarModelingMode.SheetMetalBaseFlangeOpenProfile)
+                return collector.Y + Settings.GetBranchCollectorLapYOffset();
+
+            double yOffset = Settings.BranchCollectorLapSide == CollectorLapSide.Upper
+                ? branchProfile.Thickness
+                : -Settings.CollectorProfile.Thickness;
+
+            Console.WriteLine(
+                "Branch sheet metal collector lap: collectorY=" + ToMm(collector.Y).ToString("F3") +
+                " mm, yOffset=" + ToMm(yOffset).ToString("F3") +
+                " mm -> sketch lapY=" + ToMm(collector.Y + yOffset).ToString("F3") + " mm");
+
+            return collector.Y + yOffset;
+        }
+
+        private static Point3 GetMainFeedTerminalRoutePoint(Point3 reference, BusbarProfile profile, string label)
+        {
+            if (Settings.ModelingMode != BusbarModelingMode.SheetMetalBaseFlangeOpenProfile)
+                return GetTerminalRoutePoint(reference, Settings.StartTerminalOffsetZSign, profile, label);
+
+            Console.WriteLine(
+                label +
+                " sheet metal route point: keep terminal reference as busbar width center, " +
+                "X=" + ToMm(reference.X).ToString("F3") +
+                " mm, Z=" + ToMm(reference.Z).ToString("F3") + " mm");
+
+            return reference;
+        }
+
+        private static Point3 GetTerminalRoutePoint(Point3 reference, int zSign, BusbarProfile profile, string label)
+        {
+            Point3 routePoint;
+
+            if (Settings.ModelingMode == BusbarModelingMode.SheetMetalBaseFlangeOpenProfile)
+                routePoint = reference;
+            else
+                routePoint = OffsetTerminalCenter(reference, zSign, profile);
+
+            Console.WriteLine(
+                label +
+                " route point: refZ=" + ToMm(reference.Z).ToString("F3") +
+                " mm -> pathZ=" + ToMm(routePoint.Z).ToString("F3") +
+                " mm");
+
+            return routePoint;
+        }
+
+        private static Point3 OffsetTerminalCenter(Point3 reference, int zSign, BusbarProfile profile)
         {
             return new Point3(reference.X, reference.Y, reference.Z + zSign * profile.TerminalFaceOffset);
         }
 
-        // 按组件名和点名查找必需参考点；找不到就立即报错，避免生成错误几何。
-        static FoundPoint FindRequiredPoint(List<FoundPoint> points, string componentName, string pointName)
+        private static FoundPoint FindRequiredPoint(List<FoundPoint> points, string componentName, string pointName)
         {
             FoundPoint point = points.FirstOrDefault(p => SameText(p.ComponentName, componentName) && SameText(p.PointName, pointName));
             if (point == null)
-                throw new Exception("缺少参考点：" + componentName + "." + pointName);
+                throw new Exception("Missing reference point: " + componentName + "." + pointName);
 
             return point;
         }
 
-        // 根据组件名关键词打分，用于区分刀熔和漏保。
-        // 这只是当前阶段的兼容方案；长期更稳的做法是点名或组件属性里显式写 FUSE / LOUBAO。
-        static int ScoreNameHint(string componentName, string[] hints)
+        private static int ScoreNameHint(string componentName, string[] hints)
         {
             if (string.IsNullOrWhiteSpace(componentName))
                 return 0;
@@ -562,335 +747,68 @@ namespace SwFeatureDebug
             return score;
         }
 
-        // 打印一条路径，便于检查每段折弯点。
-        static void PrintRoute(BusbarRoute route)
+        private static void PrintRoute(BusbarRoute route)
         {
             Console.WriteLine("Route: " + route.Name + " [" + route.Kind + "]");
             for (int i = 0; i < route.CenterlinePoints.Count; i++)
                 PrintPathPoint("  P" + i, route.CenterlinePoints[i]);
         }
 
-        // 自动识别当前相的起点/终点，并打印生成的铜排中心线路径点。
-        // 这里是调试路径是否正确的第一入口。
-        static List<Point3> PrintBusbarBPath(List<FoundPoint> foundPoints)
-        {
-            // 自动从所有参考点中找当前相的起点和终点。
-            // 对 B 相来说，就是找 B_OUT 和 B_IN。
-            BusbarConnection connection = AutoFindConnection(foundPoints, DebugPhaseName);
-
-            Console.WriteLine("===== " + DebugPhaseName + " phase busbar path preview =====");
-            Console.WriteLine("Auto start point: " + connection.Start);
-            Console.WriteLine("Auto end reference point: " + connection.End);
-            Console.WriteLine("Busbar size: " + Settings.ProfileLabel + " mm");
-
-            List<Point3> path = BuildBusbarPath(connection.Start.Position, connection.End.Position);
-
-            Console.WriteLine(
-                "Auto route values: leadY=" + ToMm(Settings.LeadY).ToString("F3") +
-                " mm, firstDropZ=" + ToMm(Settings.FirstDropZ).ToString("F3") +
-                " mm, endAboveZ=" + ToMm(Settings.EndAboveZ).ToString("F3") +
-                " mm, terminalHalfThickness=" + ToMm(Settings.TerminalFaceOffset).ToString("F3") + " mm");
-
-            for (int i = 0; i < path.Count; i++)
-                PrintPathPoint("P" + i, path[i]);
-
-            return path;
-        }
-
-        // 从所有 RefPoint 中自动找连接关系：刀熔 phase_OUT -> 漏保 phase_IN。
-        // 目前的判定逻辑偏学习用途：带多个 *_OUT 的组件视作刀熔，另一个组件上的 phase_IN 视作漏保输入。
-        static BusbarConnection AutoFindConnection(List<FoundPoint> foundPoints, string phase)
-        {
-            // 识别策略：
-            // 1. 起点：优先选择包含多个 *_OUT 点的组件上的 phase_OUT，通常就是刀熔开关。
-            // 2. 终点：选择另一个组件上的 phase_IN，且尽量避免选择同一个刀熔组件里的 B_IN。
-            // 后续做 A/C 相时，只需要改 PhaseName。
-            string startPointName = phase + "_OUT";
-            string endPointName = phase + "_IN";
-
-            FoundPoint start = null;
-            int bestStartScore = int.MinValue;
-
-            foreach (FoundPoint point in foundPoints)
-            {
-                if (!PointNameEquals(point, startPointName))
-                    continue;
-
-                int score = CountComponentPointsEndingWith(foundPoints, point.ComponentName, "_OUT");
-                if (score > bestStartScore)
-                {
-                    start = point;
-                    bestStartScore = score;
-                }
-            }
-
-            if (start == null)
-                throw new Exception("Cannot auto find start point: " + startPointName);
-
-            FoundPoint end = null;
-            double bestEndScore = double.MaxValue;
-
-            foreach (FoundPoint point in foundPoints)
-            {
-                if (!PointNameEquals(point, endPointName))
-                    continue;
-
-                if (SameText(point.ComponentName, start.ComponentName))
-                    continue;
-
-                double score = Math.Abs(point.Position.X - start.Position.X);
-
-                if (ComponentHasPoint(foundPoints, point.ComponentName, phase + "_OUT"))
-                    score += 100000.0;
-
-                score += CountComponentPointsEndingWith(foundPoints, point.ComponentName, "_OUT") * 1000.0;
-
-                if (score < bestEndScore)
-                {
-                    end = point;
-                    bestEndScore = score;
-                }
-            }
-
-            if (end == null)
-                throw new Exception("Cannot auto find end point in another component: " + endPointName);
-
-            return new BusbarConnection { Start = start, End = end };
-        }
-
-        // 计算铜排扫掠中心线路径。
-        // 后续要调整折弯点、避让隔板、避让其他铜排，主要就改这个函数。
-        // 输入是端子表面参考点 B_OUT/B_IN，输出是已经做过半厚度偏移后的中心线点集。
-        static List<Point3> BuildBusbarPath(Point3 startReference, Point3 endReference)
-        {
-            // 重要概念：
-            // B_OUT/B_IN 是端子表面的参考点；
-            // 扫掠路径应该是铜排“中心线”，不是铜排实体表面。
-            // 因此中心线需要相对参考点偏移 half thickness。
-            List<Point3> path = new List<Point3>();
-
-            double terminalOffset = Settings.TerminalFaceOffset;
-
-            Point3 startCenter = new Point3(
-                startReference.X,
-                startReference.Y,
-                startReference.Z + Settings.StartTerminalOffsetZSign * terminalOffset);
-
-            Point3 endCenter = new Point3(
-                endReference.X,
-                endReference.Y,
-                endReference.Z + Settings.EndTerminalOffsetZSign * terminalOffset);
-
-            Console.WriteLine("Start reference B_OUT:");
-            PrintPathPoint("  B_OUT reference", startReference);
-            PrintPathPoint("  centerline start", startCenter);
-            Console.WriteLine("End reference B_IN:");
-            PrintPathPoint("  B_IN reference", endReference);
-            PrintPathPoint("  centerline end", endCenter);
-            Console.WriteLine("Centerline terminal offset = " + ToMm(terminalOffset).ToString("F3") + " mm");
-
-            double zDirection = Math.Sign(endCenter.Z - startCenter.Z);
-            if (zDirection == 0)
-                zDirection = -1.0;
-
-            double zTravel = Math.Abs(endCenter.Z - startCenter.Z);
-            double firstDropZ = Math.Min(Settings.FirstDropZ, zTravel * 0.35);
-            double endAboveZ = Math.Min(Settings.EndAboveZ, zTravel * 0.35);
-
-            if (firstDropZ < Settings.BusbarThickness)
-                firstDropZ = Settings.BusbarThickness;
-
-            if (endAboveZ < Settings.BusbarThickness)
-                endAboveZ = Settings.BusbarThickness;
-
-            // 路径顺序对应需求描述：
-            // P0 起点中心线
-            // P1 沿 Y 负方向让开刀熔
-            // P2 沿 Z 方向第一次下降
-            // P3/P4 沿 Y 正方向走到漏保前方/上方
-            // P5/P6 沿 Z 方向靠近漏保端子
-            // P7 沿 Y 负方向进入漏保端子中心线终点
-            Point3 p0 = startCenter;
-            Point3 p1 = new Point3(p0.X, p0.Y - Settings.LeadY, p0.Z);
-            Point3 p2 = new Point3(p1.X, p1.Y, p1.Z + zDirection * firstDropZ);
-            Point3 p3 = new Point3(endCenter.X, p2.Y, p2.Z);
-            Point3 p4 = new Point3(endCenter.X, endCenter.Y + Settings.LeadY, p2.Z);
-            Point3 p5 = new Point3(endCenter.X, endCenter.Y + Settings.LeadY, endCenter.Z - zDirection * endAboveZ);
-            Point3 p6 = new Point3(endCenter.X, endCenter.Y + Settings.LeadY, endCenter.Z);
-            Point3 p7 = endCenter;
-
-            AddPathPoint(path, p0);
-            AddPathPoint(path, p1);
-            AddPathPoint(path, p2);
-            AddPathPoint(path, p3);
-            AddPathPoint(path, p4);
-            AddPathPoint(path, p5);
-            AddPathPoint(path, p6);
-            AddPathPoint(path, p7);
-
-            return path;
-        }
-
-        // 向路径里追加点，并自动跳过和上一个点重合的点，避免创建零长度草图线。
-        static void AddPathPoint(List<Point3> path, Point3 point)
+        private static void AddPathPoint(List<Point3> path, Point3 point)
         {
             if (path.Count == 0 || path[path.Count - 1].DistanceTo(point) > Mm(0.01))
                 path.Add(point);
         }
 
-        // 调试用：在装配体里直接画 3D 草图中心线，帮助肉眼检查路径点是否正确。
-        // 正式生成实体时默认不开启。
-        static void CreateAssembly3DSketch(ModelDoc2 model, List<Point3> path)
-        {
-            Console.WriteLine();
-            Console.WriteLine("===== 创建装配体 3D 草图路径 =====");
-
-            if (path == null || path.Count < 2)
-                throw new Exception("路径点数量不足，无法创建 3D 草图。");
-
-            model.ClearSelection2(true);
-
-            SketchManager sketchManager = model.SketchManager;
-            bool sketchOpened = false;
-
-            try
-            {
-                sketchManager.Insert3DSketch(true);
-                sketchOpened = true;
-
-                for (int i = 0; i < path.Count - 1; i++)
-                {
-                    Point3 a = path[i];
-                    Point3 b = path[i + 1];
-
-                    SketchSegment segment = sketchManager.CreateLine(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
-                    if (segment == null)
-                        throw new Exception("创建 3D 草图线段失败，线段编号：" + i);
-                }
-            }
-            finally
-            {
-                if (sketchOpened)
-                    sketchManager.Insert3DSketch(true);
-            }
-
-            Feature newSketch = model.FeatureByPositionReverse(0) as Feature;
-            if (newSketch != null)
-            {
-                newSketch.Name = "Debug_Busbar_" + DebugPhaseName + "_Path_" + DateTime.Now.ToString("HHmmss");
-                Console.WriteLine("已创建 3D 草图：" + newSketch.Name);
-            }
-            else
-            {
-                Console.WriteLine("3D 草图已创建，但未能获取特征对象用于重命名。");
-            }
-
-            model.EditRebuild3();
-        }
-
-        // 调试用：在装配体里画 6x60 等规格的截面预览，确认宽度/厚度方向是否符合预期。
-        static void CreateAssemblyProfilePreview(ModelDoc2 model, Point3 center)
-        {
-            Console.WriteLine();
-            Console.WriteLine($"===== 创建 {Settings.ProfileLabel}mm 截面预览 =====");
-
-            double widthX = Settings.BusbarWidth;
-            double thicknessZ = Settings.BusbarThickness;
-
-            double halfWidth = widthX / 2.0;
-            double halfThickness = thicknessZ / 2.0;
-
-            // 首段路径是沿 Y 方向，所以截面放在 XZ 平面，Y 坐标固定为起点 Y。
-            Point3 p1 = new Point3(center.X - halfWidth, center.Y, center.Z - halfThickness);
-            Point3 p2 = new Point3(center.X + halfWidth, center.Y, center.Z - halfThickness);
-            Point3 p3 = new Point3(center.X + halfWidth, center.Y, center.Z + halfThickness);
-            Point3 p4 = new Point3(center.X - halfWidth, center.Y, center.Z + halfThickness);
-
-            model.ClearSelection2(true);
-
-            SketchManager sketchManager = model.SketchManager;
-            bool sketchOpened = false;
-
-            try
-            {
-                sketchManager.Insert3DSketch(true);
-                sketchOpened = true;
-
-                CreateLineOrThrow(sketchManager, p1, p2, "截面线1");
-                CreateLineOrThrow(sketchManager, p2, p3, "截面线2");
-                CreateLineOrThrow(sketchManager, p3, p4, "截面线3");
-                CreateLineOrThrow(sketchManager, p4, p1, "截面线4");
-            }
-            finally
-            {
-                if (sketchOpened)
-                    sketchManager.Insert3DSketch(true);
-            }
-
-            Feature newSketch = model.FeatureByPositionReverse(0) as Feature;
-            if (newSketch != null)
-            {
-                newSketch.Name = "Debug_Busbar_" + DebugPhaseName + "_Profile_" + Settings.ProfileLabel + "_" + DateTime.Now.ToString("HHmmss");
-                Console.WriteLine("已创建截面预览 3D 草图：" + newSketch.Name);
-            }
-            else
-            {
-                Console.WriteLine("截面预览已创建，但未能获取特征对象用于重命名。");
-            }
-
-            model.EditRebuild3();
-        }
-
-        // 创建草图直线；如果 SW API 返回 null，就立即抛错，便于定位是哪一段失败。
-        static void CreateLineOrThrow(SketchManager sketchManager, Point3 a, Point3 b, string name)
+        private static SketchSegment CreateLineOrThrow(SketchManager sketchManager, Point3 a, Point3 b, string name)
         {
             SketchSegment segment = sketchManager.CreateLine(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
             if (segment == null)
-                throw new Exception("创建 " + name + " 失败。");
+                throw new Exception("Failed to create sketch line: " + name);
+
+            return segment;
         }
 
-        // 生成铜排实体的总入口：新建零件 -> 创建路径草图 -> 创建截面草图 -> 扫掠 -> 保存 -> 插入装配体 -> 关闭新零件窗口。
-        static void CreateBusbarSolidPart(SldWorks swApp, ModelDoc2 asmModel, AssemblyDoc asm, BusbarRoute route)
+        private static void CreateBusbarSolidPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarRoute route)
         {
-            // 建模策略：
-            // 在新零件中用装配体坐标直接创建铜排实体，然后以 identity transform 插回装配体。
-            // 这样零件坐标 = 装配体坐标，避免插入后再计算复杂配合。
             Console.WriteLine();
-            Console.WriteLine("===== 创建铜排实体零件 =====");
+            Console.WriteLine("===== Create busbar part =====");
+            Console.WriteLine(route.Name + " / " + (route.Profile ?? Settings.GetProfile(route.Kind)).Label + "mm");
 
             ModelDoc2 partModel = NewPartDocument(swApp);
-
             ActivateDocument(swApp, partModel);
 
-            Feature pathSketch = CreatePart3DPathSketch(partModel, route);
-            Feature profileSketch = CreatePartProfileSketch(swApp, partModel, route);
-            Feature sweep = CreateSweepFeature(partModel, profileSketch, pathSketch);
+            Feature sheetMetalFeature = CreateBusbarFeature(swApp, partModel, route);
 
-            if (sweep != null)
-                sweep.Name = route.Name;
+            if (sheetMetalFeature != null)
+                sheetMetalFeature.Name = route.Name;
 
             partModel.EditRebuild3();
 
-            string savePath = SaveBusbarPart(partModel, asmModel, route);
-            InsertBusbarPartIntoAssembly(swApp, asmModel, asm, savePath, route);
-            CloseBusbarPartDocument(swApp, asmModel, partModel);
+            string savePath = SaveBusbarPart(partModel, assemblyModel, route);
+            InsertBusbarPartIntoAssembly(swApp, assemblyModel, assembly, savePath, route);
+            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
 
-            Console.WriteLine("铜排实体已生成并插入装配体。");
+            Console.WriteLine("Busbar part created and inserted.");
         }
 
-        // 新建铜排零件文档。
-        // 如果默认模板是 ~BLANK_PART_TEMPLATE.prtdot 这种内部模板名，就改用 NewPart()。
-        static ModelDoc2 NewPartDocument(SldWorks swApp)
+        private static Feature CreateBusbarFeature(SldWorks swApp, ModelDoc2 partModel, BusbarRoute route)
+        {
+            if (Settings.ModelingMode == BusbarModelingMode.SheetMetalBaseFlangeOpenProfile)
+                return CreateSheetMetalOpenProfileBaseFlangeFeature(swApp, partModel, route);
+
+            BusbarPathSketchResult pathSketch = CreatePart3DPathSketch(partModel, route);
+            Feature profileSketch = CreatePartProfileSketch(swApp, partModel, route);
+            return CreateSweptFlangeFeature(partModel, profileSketch, pathSketch, route);
+        }
+
+        private static ModelDoc2 NewPartDocument(SldWorks swApp)
         {
             string templatePath = swApp.GetUserPreferenceStringValue((int)swUserPreferenceStringValue_e.swDefaultTemplatePart);
-            bool templateFileExists = !string.IsNullOrWhiteSpace(templatePath) && System.IO.File.Exists(templatePath);
+            bool templateExists = !string.IsNullOrWhiteSpace(templatePath) && File.Exists(templatePath);
 
-            Console.WriteLine("默认零件模板：" + templatePath);
-            Console.WriteLine("模板文件存在：" + templateFileExists);
-
-            ModelDoc2 partModel = null;
-
-            if (templateFileExists)
+            ModelDoc2 partModel;
+            if (templateExists)
             {
                 partModel = swApp.NewDocument(
                     templatePath,
@@ -900,27 +818,24 @@ namespace SwFeatureDebug
             }
             else
             {
-                Console.WriteLine("默认模板不是磁盘文件，改用 SolidWorks 空白零件 NewPart()。");
                 partModel = swApp.NewPart() as ModelDoc2;
             }
 
             if (partModel == null)
-                throw new Exception("新建铜排零件失败。请确认 SolidWorks 能手动新建零件，或在 系统选项 > 默认模板 中设置真实的 .prtdot 路径。");
+                throw new Exception("Failed to create a new SolidWorks part.");
 
             return partModel;
         }
 
-        // 在铜排零件内创建 3D 路径草图。
-        // 这些路径点已经是装配体坐标；后面插回装配体时用 identity transform 对齐。
-        static Feature CreatePart3DPathSketch(ModelDoc2 partModel, BusbarRoute route)
+        private static BusbarPathSketchResult CreatePart3DPathSketch(ModelDoc2 partModel, BusbarRoute route)
         {
-            // 用 3D 草图创建扫掠路径。
-            // path 内所有点都已经是装配体全局坐标；新零件插回装配体时使用 identity transform。
-            Console.WriteLine("创建零件内 3D 路径草图...");
+            if (route.CenterlinePoints == null || route.CenterlinePoints.Count < 2)
+                throw new Exception("Route has fewer than two points: " + route.Name);
 
             partModel.ClearSelection2(true);
 
             SketchManager sketchManager = partModel.SketchManager;
+            List<SketchSegment> pathSegments = new List<SketchSegment>();
             bool sketchOpened = false;
 
             try
@@ -930,7 +845,12 @@ namespace SwFeatureDebug
 
                 for (int i = 0; i < route.CenterlinePoints.Count - 1; i++)
                 {
-                    CreateLineOrThrow(sketchManager, route.CenterlinePoints[i], route.CenterlinePoints[i + 1], "路径线段" + i);
+                    pathSegments.Add(
+                        CreateLineOrThrow(
+                            sketchManager,
+                            route.CenterlinePoints[i],
+                            route.CenterlinePoints[i + 1],
+                            "path segment " + i));
                 }
             }
             finally
@@ -941,73 +861,253 @@ namespace SwFeatureDebug
 
             Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
             if (sketch == null)
-                throw new Exception("路径草图已创建，但无法获取路径草图特征。");
+                throw new Exception("Path sketch was created but could not be located.");
 
             sketch.Name = route.Name + "_Path";
-            return sketch;
+            return new BusbarPathSketchResult
+            {
+                Feature = sketch,
+                Sketch = sketch.GetSpecificFeature2() as Sketch,
+                Segments = pathSegments
+            };
         }
 
-        // 在路径起点处创建矩形截面草图。
-        // 注意：截面四角先按模型坐标计算，再用 ModelToSketchTransform 转成 2D 草图坐标。
-        static Feature CreatePartProfileSketch(SldWorks swApp, ModelDoc2 partModel, BusbarRoute route)
+        private static Feature CreateSheetMetalOpenProfileBaseFlangeFeature(SldWorks swApp, ModelDoc2 partModel, BusbarRoute route)
         {
-            // 创建矩形截面草图。
-            // center 必须是 path[0]，也就是扫掠路径起点中心线。
-            Point3 center = route.CenterlinePoints[0];
-            AxisDirection firstAxis = GetDominantAxis(route.CenterlinePoints[0], route.CenterlinePoints[1]);
             BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
-            Console.WriteLine($"创建零件内 {profile.Label}mm 截面草图...");
-            Feature profilePlane = CreateProfilePlane(partModel, center, firstAxis);
+            Console.WriteLine(
+                "Create sheet metal base flange from open planar route: " +
+                profile.Label +
+                "mm, R=" + Settings.SheetMetalBendRadiusMm.ToString("0.###") +
+                "mm, K=" + Settings.SheetMetalKFactor.ToString("0.###"));
+
+            SheetMetalOpenProfilePlane profilePlane = GetOpenProfilePlane(route);
+            Feature sketch = CreateRouteOpenProfileSketch(swApp, partModel, route, profilePlane);
+            Feature feature = CreateSheetMetalBaseFlangeFromSelectedSketch(partModel, sketch, profile, route.Kind);
+
+            if (feature == null)
+                throw new Exception("Open-profile base flange creation failed: " + route.Name);
+
+            ApplySheetMetalParametersToCreatedFeature(feature, partModel, profile);
+            return feature;
+        }
+
+        private static SheetMetalOpenProfilePlane GetOpenProfilePlane(BusbarRoute route)
+        {
+            if (route == null || route.CenterlinePoints == null || route.CenterlinePoints.Count < 2)
+                throw new Exception("Route is invalid for open-profile sheet metal.");
+
+            bool sameX = AllSameCoordinate(route.CenterlinePoints, AxisDirection.X);
+            bool sameY = AllSameCoordinate(route.CenterlinePoints, AxisDirection.Y);
+            bool sameZ = AllSameCoordinate(route.CenterlinePoints, AxisDirection.Z);
+
+            if (route.Kind == BusbarKind.Collector)
+            {
+                if (!sameZ)
+                    throw new Exception("Collector route must stay on a constant Z plane: " + route.Name);
+
+                return new SheetMetalOpenProfilePlane("Front", route.CenterlinePoints[0].Z, AxisDirection.X, AxisDirection.Y);
+            }
+
+            if (sameX)
+                return new SheetMetalOpenProfilePlane("Right", route.CenterlinePoints[0].X, AxisDirection.Y, AxisDirection.Z);
+
+            if (sameY)
+                return new SheetMetalOpenProfilePlane("Top", route.CenterlinePoints[0].Y, AxisDirection.X, AxisDirection.Z);
+
+            if (sameZ)
+                return new SheetMetalOpenProfilePlane("Front", route.CenterlinePoints[0].Z, AxisDirection.X, AxisDirection.Y);
+
+            throw new Exception("Open-profile sheet metal currently supports only routes on a single X/Y/Z plane: " + route.Name);
+        }
+
+        private static bool AllSameCoordinate(List<Point3> points, AxisDirection axis)
+        {
+            double first = GetCoordinate(points[0], axis);
+            const double tolerance = 0.000001;
+
+            foreach (Point3 point in points)
+            {
+                if (Math.Abs(GetCoordinate(point, axis) - first) > tolerance)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static double GetCoordinate(Point3 point, AxisDirection axis)
+        {
+            if (axis == AxisDirection.X)
+                return point.X;
+
+            if (axis == AxisDirection.Y)
+                return point.Y;
+
+            return point.Z;
+        }
+
+        private static Feature CreateRouteOpenProfileSketch(SldWorks swApp, ModelDoc2 partModel, BusbarRoute route, SheetMetalOpenProfilePlane profilePlane)
+        {
+            Console.WriteLine(
+                "Open-profile sketch plane: " +
+                profilePlane.BasePlaneRole +
+                " offset=" + ToMm(profilePlane.Offset).ToString("F3") + " mm");
+
+            Feature plane = CreateOffsetPlane(partModel, profilePlane.BasePlaneRole, profilePlane.Offset);
 
             partModel.ClearSelection2(true);
-            if (!profilePlane.Select2(false, 0))
-                throw new Exception("选择截面基准面失败。");
+            if (!plane.Select2(false, 0))
+                throw new Exception("Failed to select open-profile sketch plane: " + route.Name);
 
             SketchManager sketchManager = partModel.SketchManager;
             sketchManager.InsertSketch(true);
 
-            double widthX = profile.Width;
-            double thicknessZ = profile.Thickness;
-            double halfWidth = widthX / 2.0;
-            double halfThickness = thicknessZ / 2.0;
-
-            Sketch activeSketch = partModel.GetActiveSketch2() as Sketch;
-            if (activeSketch == null)
-                throw new Exception("无法获取当前截面草图。");
-
-            MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
-            if (modelToSketch == null)
-                throw new Exception("无法获取截面草图的模型坐标到草图坐标转换。");
-
-            // 先在“模型坐标”里定义矩形，保证它的中心就是路径起点 center。
-            // 矩形所在平面必须垂直于路径首段：
-            // - 首段沿 Y：截面在 XZ 平面，宽度沿 X，厚度沿 Z。
-            // - 首段沿 X：截面在 YZ 平面，宽度沿 Y，厚度沿 Z。
-            // - 首段沿 Z：截面在 XY 平面，宽度沿 X，厚度沿 Y。
-            Point3 m1;
-            Point3 m2;
-            Point3 m3;
-            Point3 m4;
-            BuildProfileCorners(center, firstAxis, halfWidth, halfThickness, out m1, out m2, out m3, out m4);
-
-            Point3 p1 = ModelPointToSketchPoint(swApp, m1, modelToSketch);
-            Point3 p2 = ModelPointToSketchPoint(swApp, m2, modelToSketch);
-            Point3 p3 = ModelPointToSketchPoint(swApp, m3, modelToSketch);
-            Point3 p4 = ModelPointToSketchPoint(swApp, m4, modelToSketch);
-
-            Console.WriteLine("Profile center check:");
-            PrintPathPoint("  model center", center);
-            PrintPathPoint("  model p1", m1);
-            PrintPathPoint("  model p2", m2);
-            PrintPathPoint("  model p3", m3);
-            PrintPathPoint("  model p4", m4);
+            bool sketchStillOpen = true;
 
             try
             {
-                CreateLineOrThrow(sketchManager, p1, p2, "截面线1");
-                CreateLineOrThrow(sketchManager, p2, p3, "截面线2");
-                CreateLineOrThrow(sketchManager, p3, p4, "截面线3");
-                CreateLineOrThrow(sketchManager, p4, p1, "截面线4");
+                Sketch activeSketch = partModel.GetActiveSketch2() as Sketch;
+                if (activeSketch == null)
+                    throw new Exception("Failed to get active open-profile sketch: " + route.Name);
+
+                MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
+                if (modelToSketch == null)
+                    throw new Exception("Failed to get open-profile ModelToSketchTransform: " + route.Name);
+
+                List<Point3> sketchPoints = GetOpenProfileSketchPointOrder(route);
+
+                for (int i = 0; i < sketchPoints.Count - 1; i++)
+                {
+                    Point3 p1 = FlattenSketchPoint(ModelPointToSketchPoint(swApp, sketchPoints[i], modelToSketch));
+                    Point3 p2 = FlattenSketchPoint(ModelPointToSketchPoint(swApp, sketchPoints[i + 1], modelToSketch));
+                    CreateLineOrThrow(sketchManager, p1, p2, "open profile segment " + i);
+                }
+
+                sketchManager.InsertSketch(true);
+                sketchStillOpen = false;
+            }
+            finally
+            {
+                if (sketchStillOpen)
+                    sketchManager.InsertSketch(true);
+            }
+
+            Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
+            if (sketch == null)
+                throw new Exception("Open-profile sketch was created but could not be located.");
+
+            sketch.Name = route.Name + "_OpenProfile";
+            return sketch;
+        }
+
+        private static List<Point3> GetOpenProfileSketchPointOrder(BusbarRoute route)
+        {
+            List<Point3> points = route.CenterlinePoints;
+
+            if (route.Kind == BusbarKind.Branch && Settings.ReverseBranchOpenProfileSketchDirection)
+            {
+                Console.WriteLine("Open-profile sketch draw order: reversed for branch material side alignment.");
+                List<Point3> reversed = new List<Point3>(route.CenterlinePoints);
+                reversed.Reverse();
+                points = reversed;
+            }
+
+            return ApplyOpenProfileSketchCompensation(route, points);
+        }
+
+        private static List<Point3> ApplyOpenProfileSketchCompensation(BusbarRoute route, List<Point3> points)
+        {
+            BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
+            List<Point3> compensated = new List<Point3>(points);
+
+            if (route.Kind == BusbarKind.Branch)
+                ApplyBranchTerminalClearance(compensated, route.CenterlinePoints, profile);
+
+            for (int i = 0; i < compensated.Count; i++)
+            {
+                Point3 original = i < points.Count ? points[i] : compensated[i];
+                if (original.DistanceTo(compensated[i]) <= Mm(0.001))
+                    continue;
+
+                Console.WriteLine(
+                    "Open-profile sketch compensation [" + route.Kind + "] P" + i +
+                    ": dX=" + ToMm(compensated[i].X - original.X).ToString("F3") +
+                    " mm, dY=" + ToMm(compensated[i].Y - original.Y).ToString("F3") +
+                    " mm, dZ=" + ToMm(compensated[i].Z - original.Z).ToString("F3") + " mm");
+            }
+
+            return compensated;
+        }
+
+        private static void ApplyBranchTerminalClearance(List<Point3> sketchPoints, List<Point3> routePoints, BusbarProfile profile)
+        {
+            if (sketchPoints == null || sketchPoints.Count < 2 || routePoints == null || routePoints.Count < 2)
+                return;
+
+            Point3 routeStart = routePoints[0];
+            int terminalIndex = FindPointIndex(sketchPoints, routeStart);
+            if (terminalIndex < 0)
+                return;
+
+            double zOffset = Settings.EndTerminalOffsetZSign * profile.Thickness;
+            Point3 terminal = sketchPoints[terminalIndex];
+            sketchPoints[terminalIndex] = new Point3(terminal.X, terminal.Y, terminal.Z + zOffset);
+
+            int nextIndex = terminalIndex == 0 ? 1 : terminalIndex - 1;
+            Point3 next = sketchPoints[nextIndex];
+
+            if (Math.Abs(next.Z - routeStart.Z) <= Mm(0.01))
+                sketchPoints[nextIndex] = new Point3(next.X, next.Y, next.Z + zOffset);
+
+            Console.WriteLine(
+                "Branch terminal sketch clearance: zOffset=" + ToMm(zOffset).ToString("F3") +
+                " mm from branch thickness " + ToMm(profile.Thickness).ToString("F3") +
+                " mm, terminalIndex=" + terminalIndex);
+        }
+
+        private static int FindPointIndex(List<Point3> points, Point3 target)
+        {
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (points[i].DistanceTo(target) <= Mm(0.01))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static Feature CreatePartProfileSketch(SldWorks swApp, ModelDoc2 partModel, BusbarRoute route)
+        {
+            Point3 center = route.CenterlinePoints[0];
+            AxisDirection firstAxis = GetDominantAxis(route.CenterlinePoints[0], route.CenterlinePoints[1]);
+            BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
+            Feature profilePlane = CreateProfilePlane(partModel, center, firstAxis);
+
+            partModel.ClearSelection2(true);
+            if (!profilePlane.Select2(false, 0))
+                throw new Exception("Failed to select profile plane.");
+
+            SketchManager sketchManager = partModel.SketchManager;
+            sketchManager.InsertSketch(true);
+
+            Sketch activeSketch = partModel.GetActiveSketch2() as Sketch;
+            if (activeSketch == null)
+                throw new Exception("Failed to get active profile sketch.");
+
+            MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
+            if (modelToSketch == null)
+                throw new Exception("Failed to get ModelToSketchTransform for profile sketch.");
+
+            Point3 modelStart;
+            Point3 modelEnd;
+            BuildProfileLineEndpoints(center, firstAxis, profile.Width / 2.0, out modelStart, out modelEnd);
+
+            Point3 sketchStart = FlattenSketchPoint(ModelPointToSketchPoint(swApp, modelStart, modelToSketch));
+            Point3 sketchEnd = FlattenSketchPoint(ModelPointToSketchPoint(swApp, modelEnd, modelToSketch));
+
+            try
+            {
+                CreateLineOrThrow(sketchManager, sketchStart, sketchEnd, "sheet metal profile");
             }
             finally
             {
@@ -1016,49 +1116,13 @@ namespace SwFeatureDebug
 
             Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
             if (sketch == null)
-                throw new Exception("截面草图已创建，但无法获取截面草图特征。");
+                throw new Exception("Profile sketch was created but could not be located.");
 
             sketch.Name = "Busbar_Profile_" + profile.Label;
             return sketch;
         }
 
-        // 创建截面基准面：从 Top Plane 沿 Y 方向偏移到路径起点所在的 Y 坐标。
-        // yOffset 为负时必须用 flipDirection，避免截面平面跑到相反方向。
-        static Feature CreateOffsetTopPlane(ModelDoc2 partModel, double yOffset)
-        {
-            // 扫掠首段沿 Y 方向，因此截面平面需要垂直于 Y。
-            // SolidWorks 默认 Top Plane 是 XZ 平面，法向正好沿 Y，所以这里创建一个偏移 Top Plane。
-            Feature topPlane = FindTopPlane(partModel);
-            if (topPlane == null)
-                throw new Exception("找不到上视基准面/Top Plane，无法创建截面基准面。");
-
-            partModel.ClearSelection2(true);
-            topPlane.Select2(false, 0);
-
-            double distance = Math.Abs(yOffset);
-            bool flipDirection = yOffset < 0;
-
-            // 关键点：
-            // yOffset 可能是负数，例如 B_OUT.Y = -105mm。
-            // 直接传负距离不可靠，所以用绝对距离 + flipDirection 明确指定偏移方向。
-            Console.WriteLine(
-                "Profile plane offset Y = " + ToMm(yOffset).ToString("F3") +
-                " mm, distance = " + ToMm(distance).ToString("F3") +
-                " mm, flip = " + flipDirection);
-
-            partModel.ICreatePlaneAtOffset3(distance, flipDirection, true);
-
-            Feature plane = partModel.FeatureByPositionReverse(0) as Feature;
-            if (plane == null)
-                throw new Exception("创建截面基准面失败。");
-
-            plane.Name = "Busbar_ProfilePlane";
-            return plane;
-        }
-
-        // 根据路径首段方向创建垂直于路径的截面基准面。
-        // 这一步决定 Sweep 能否成功：截面必须垂直于路径首段。
-        static Feature CreateProfilePlane(ModelDoc2 partModel, Point3 center, AxisDirection firstAxis)
+        private static Feature CreateProfilePlane(ModelDoc2 partModel, Point3 center, AxisDirection firstAxis)
         {
             if (firstAxis == AxisDirection.Y)
                 return CreateOffsetPlane(partModel, "Top", center.Y);
@@ -1069,13 +1133,11 @@ namespace SwFeatureDebug
             return CreateOffsetPlane(partModel, "Front", center.Z);
         }
 
-        // 从默认基准面创建偏移平面。
-        // Top 平面法向 Y，Right 平面法向 X，Front 平面法向 Z。
-        static Feature CreateOffsetPlane(ModelDoc2 partModel, string basePlaneRole, double offset)
+        private static Feature CreateOffsetPlane(ModelDoc2 partModel, string basePlaneRole, double offset)
         {
             Feature basePlane = FindDefaultPlane(partModel, basePlaneRole);
             if (basePlane == null)
-                throw new Exception("找不到默认基准面：" + basePlaneRole);
+                throw new Exception("Default plane not found: " + basePlaneRole);
 
             partModel.ClearSelection2(true);
             basePlane.Select2(false, 0);
@@ -1083,24 +1145,84 @@ namespace SwFeatureDebug
             double distance = Math.Abs(offset);
             bool flipDirection = offset < 0;
 
-            Console.WriteLine(
-                "Profile plane " + basePlaneRole +
-                " offset = " + ToMm(offset).ToString("F3") +
-                " mm, distance = " + ToMm(distance).ToString("F3") +
-                " mm, flip = " + flipDirection);
-
             partModel.ICreatePlaneAtOffset3(distance, flipDirection, true);
 
-            Feature plane = partModel.FeatureByPositionReverse(0) as Feature;
+            Feature plane = FindLastFeatureByType(partModel, "RefPlane");
             if (plane == null)
-                throw new Exception("创建截面基准面失败：" + basePlaneRole);
+                throw new Exception("Failed to create offset plane: " + basePlaneRole);
+
+            Console.WriteLine(
+                "Created offset plane: role=" + basePlaneRole +
+                ", offset=" + ToMm(offset).ToString("F3") +
+                " mm, type=" + plane.GetTypeName2());
 
             plane.Name = "Busbar_ProfilePlane_" + basePlaneRole;
             return plane;
         }
 
-        // 判断路径首段主要沿 X/Y/Z 哪个轴。
-        static AxisDirection GetDominantAxis(Point3 a, Point3 b)
+        private static Feature FindLastFeatureByType(ModelDoc2 model, string typeName)
+        {
+            Feature feature = model.FirstFeature() as Feature;
+            Feature lastMatch = null;
+
+            while (feature != null)
+            {
+                if (SameText(feature.GetTypeName2(), typeName))
+                    lastMatch = feature;
+
+                feature = feature.GetNextFeature() as Feature;
+            }
+
+            return lastMatch;
+        }
+
+        private static Feature FindDefaultPlane(ModelDoc2 partModel, string role)
+        {
+            string[] names;
+            int fallbackIndex;
+
+            if (SameText(role, "Right"))
+            {
+                names = new[] { "Right Plane", "Right" };
+                fallbackIndex = 2;
+            }
+            else if (SameText(role, "Front"))
+            {
+                names = new[] { "Front Plane", "Front" };
+                fallbackIndex = 0;
+            }
+            else
+            {
+                names = new[] { "Top Plane", "Top" };
+                fallbackIndex = 1;
+            }
+
+            int refPlaneIndex = 0;
+            Feature feature = partModel.FirstFeature() as Feature;
+
+            while (feature != null)
+            {
+                if (feature.GetTypeName2() == "RefPlane")
+                {
+                    foreach (string name in names)
+                    {
+                        if (SameText(feature.Name, name))
+                            return feature;
+                    }
+
+                    if (refPlaneIndex == fallbackIndex)
+                        return feature;
+
+                    refPlaneIndex++;
+                }
+
+                feature = feature.GetNextFeature() as Feature;
+            }
+
+            return null;
+        }
+
+        private static AxisDirection GetDominantAxis(Point3 a, Point3 b)
         {
             double dx = Math.Abs(b.X - a.X);
             double dy = Math.Abs(b.Y - a.Y);
@@ -1115,198 +1237,944 @@ namespace SwFeatureDebug
             return AxisDirection.Z;
         }
 
-        // 根据首段方向在模型坐标中构造矩形截面四个角。
-        static void BuildProfileCorners(Point3 center, AxisDirection firstAxis, double halfWidth, double halfThickness, out Point3 p1, out Point3 p2, out Point3 p3, out Point3 p4)
+        private static void BuildProfileLineEndpoints(Point3 center, AxisDirection firstAxis, double halfWidth, out Point3 start, out Point3 end)
         {
             if (firstAxis == AxisDirection.X)
             {
-                // 汇流排沿 X 方向时，先按“横着放”处理：
-                // 宽度铺在 Z 方向，厚度放在 Y 方向。
-                p1 = new Point3(center.X, center.Y - halfThickness, center.Z - halfWidth);
-                p2 = new Point3(center.X, center.Y + halfThickness, center.Z - halfWidth);
-                p3 = new Point3(center.X, center.Y + halfThickness, center.Z + halfWidth);
-                p4 = new Point3(center.X, center.Y - halfThickness, center.Z + halfWidth);
+                start = new Point3(center.X, center.Y, center.Z - halfWidth);
+                end = new Point3(center.X, center.Y, center.Z + halfWidth);
                 return;
             }
 
             if (firstAxis == AxisDirection.Z)
             {
-                p1 = new Point3(center.X - halfWidth, center.Y - halfThickness, center.Z);
-                p2 = new Point3(center.X + halfWidth, center.Y - halfThickness, center.Z);
-                p3 = new Point3(center.X + halfWidth, center.Y + halfThickness, center.Z);
-                p4 = new Point3(center.X - halfWidth, center.Y + halfThickness, center.Z);
+                start = new Point3(center.X - halfWidth, center.Y, center.Z);
+                end = new Point3(center.X + halfWidth, center.Y, center.Z);
                 return;
             }
 
-            p1 = new Point3(center.X - halfWidth, center.Y, center.Z - halfThickness);
-            p2 = new Point3(center.X + halfWidth, center.Y, center.Z - halfThickness);
-            p3 = new Point3(center.X + halfWidth, center.Y, center.Z + halfThickness);
-            p4 = new Point3(center.X - halfWidth, center.Y, center.Z + halfThickness);
+            start = new Point3(center.X - halfWidth, center.Y, center.Z);
+            end = new Point3(center.X + halfWidth, center.Y, center.Z);
         }
 
-        // 把模型坐标点转换为当前 2D 草图坐标点。
-        // 这是保证“截面中心 = 路径起点”的关键坐标变换。
-        static Point3 ModelPointToSketchPoint(SldWorks swApp, Point3 modelPoint, MathTransform modelToSketch)
+        private static Point3 ModelPointToSketchPoint(SldWorks swApp, Point3 modelPoint, MathTransform modelToSketch)
         {
-            // 把模型坐标转换到当前 2D 草图坐标。
-            // 这是保证“截面中心 = 路径起点”的关键。
-            MathUtility mathUtility = (MathUtility)swApp.GetMathUtility();
-            MathPoint point = (MathPoint)mathUtility.CreatePoint(new double[]
-            {
-                modelPoint.X,
-                modelPoint.Y,
-                modelPoint.Z
-            });
-
+            MathUtility utility = (MathUtility)swApp.GetMathUtility();
+            MathPoint point = (MathPoint)utility.CreatePoint(new[] { modelPoint.X, modelPoint.Y, modelPoint.Z });
             MathPoint sketchPoint = (MathPoint)point.MultiplyTransform(modelToSketch);
             double[] data = sketchPoint.ArrayData as double[];
 
             if (data == null || data.Length < 3)
-                throw new Exception("模型点转换到草图坐标失败。");
+                throw new Exception("Failed to convert model point to sketch point.");
 
             return new Point3(data[0], data[1], data[2]);
         }
 
-        // 查找零件默认 Top Plane / 上视基准面。
-        // 中英文模板名不同，所以先按名称找，找不到再按默认基准面顺序兜底。
-        static Feature FindTopPlane(ModelDoc2 partModel)
+        private static Point3 FlattenSketchPoint(Point3 point)
         {
-            string[] names = { "上视基准面", "Top Plane", "上基准面" };
+            return new Point3(point.X, point.Y, 0.0);
+        }
 
-            int refPlaneIndex = 0;
-            Feature feat = partModel.FirstFeature() as Feature;
+        private static Feature CreateSweptFlangeFeature(ModelDoc2 partModel, Feature profileSketchFeature, BusbarPathSketchResult pathSketch, BusbarRoute route)
+        {
+            Console.WriteLine("Create sheet metal swept flange...");
 
-            while (feat != null)
+            Sketch profileSketch = GetSketchFromFeature(profileSketchFeature, "profile");
+            object pathObjects = GetSheetMetalPathObjects(pathSketch);
+
+            FeatureManager featureManager = partModel.FeatureManager;
+            ISweptFlangeFeatureData featureData = featureManager.CreateDefinition((int)swFeatureNameID_e.swFmSweptFlange) as ISweptFlangeFeatureData;
+            if (featureData == null)
+                throw new Exception("Failed to create swept flange feature definition.");
+
+            CustomBendAllowance bendAllowance = CreateKFactorBendAllowance(featureManager);
+
+            featureData.Path = pathObjects;
+            featureData.Profile = profileSketch;
+            featureData.StartOffset = 0.0;
+            featureData.EndOffset = 0.0;
+            featureData.TrimSideBends = true;
+            featureData.ReverseDirection = Settings.SheetMetalReverseDirection;
+            featureData.FlattenAlongPath = false;
+            featureData.UseGaugeTable = false;
+            featureData.UseMaterialSheetMetalParameters = false;
+            featureData.OverrideDefaultSheetMetalParameters = true;
+            featureData.UseDefaultRadius = false;
+            featureData.BendRadius = Settings.SheetMetalBendRadius;
+            featureData.Thickness = (route.Profile ?? Settings.GetProfile(route.Kind)).Thickness;
+            featureData.FlangePosition = Settings.SheetMetalFlangePosition;
+            featureData.UseDefaultBendAllowance = false;
+            featureData.SetCustomBendAllowance(bendAllowance);
+            featureData.UseDefaultBendRelief = false;
+            featureData.UseReliefRatio = false;
+            featureData.ReliefType = (int)swSheetMetalReliefTypes_e.swSheetMetalReliefRectangular;
+            featureData.ReliefWidth = Math.Max((route.Profile ?? Settings.GetProfile(route.Kind)).Thickness, Settings.SheetMetalBendRadius);
+            featureData.ReliefDepth = Math.Max((route.Profile ?? Settings.GetProfile(route.Kind)).Thickness, Settings.SheetMetalBendRadius);
+
+            Feature sweptFlange = featureManager.CreateFeature(featureData);
+            if (sweptFlange == null)
+                throw new Exception("Swept flange creation failed. ErrorCode=" + featureData.GetErrorCodes());
+
+            partModel.ClearSelection2(true);
+            ApplySheetMetalParametersToCreatedFeature(sweptFlange, partModel, route.Profile ?? Settings.GetProfile(route.Kind));
+            return sweptFlange;
+        }
+
+        private static Feature CreateSheetMetalBaseFlangeFromActiveOpenProfile(ModelDoc2 partModel, BusbarProfile profile)
+        {
+            CustomBendAllowance bendAllowance = CreateKFactorBendAllowance(partModel.FeatureManager);
+            SheetMetalBaseFlangeExtent widthExtent = GetSheetMetalBaseFlangeExtent(profile, SheetMetalWidthSide.Center);
+
+            return partModel.FeatureManager.InsertSheetMetalBaseFlange2(
+                profile.Thickness,
+                Settings.SheetMetalThickenDirection,
+                Settings.SheetMetalBendRadius,
+                widthExtent.Dist1,
+                widthExtent.Dist2,
+                widthExtent.FlipExtrudeDirection,
+                widthExtent.EndCondition1,
+                widthExtent.EndCondition2,
+                widthExtent.DirToUse,
+                bendAllowance,
+                false,
+                (int)swSheetMetalReliefTypes_e.swSheetMetalReliefObround,
+                Mm(0.1),
+                Mm(0.1),
+                0.5,
+                true,
+                false,
+                true,
+                true);
+        }
+
+        private static Feature CreateSheetMetalBaseFlangeFromSelectedSketch(ModelDoc2 partModel, Feature sketch, BusbarProfile profile, BusbarKind kind)
+        {
+            partModel.ClearSelection2(true);
+            if (!sketch.Select2(false, 0))
+                throw new Exception("Failed to select open-profile sketch.");
+
+            CustomBendAllowance bendAllowance = CreateKFactorBendAllowance(partModel.FeatureManager);
+            SheetMetalBaseFlangeExtent widthExtent = GetSheetMetalBaseFlangeExtent(profile, Settings.GetSheetMetalWidthSide(kind));
+
+            Console.WriteLine(
+                "Sheet metal width side [" + kind + "]: " +
+                Settings.GetSheetMetalWidthSide(kind) +
+                ", mode=" + widthExtent.ModeLabel +
+                ", dist1=" + ToMm(widthExtent.Dist1).ToString("F3") +
+                " mm, dist2=" + ToMm(widthExtent.Dist2).ToString("F3") +
+                " mm, end1=" + widthExtent.EndCondition1 +
+                ", end2=" + widthExtent.EndCondition2 +
+                ", dirToUse=" + widthExtent.DirToUse);
+
+            Feature feature = partModel.FeatureManager.InsertSheetMetalBaseFlange2(
+                profile.Thickness,
+                Settings.SheetMetalThickenDirection,
+                Settings.SheetMetalBendRadius,
+                widthExtent.Dist1,
+                widthExtent.Dist2,
+                widthExtent.FlipExtrudeDirection,
+                widthExtent.EndCondition1,
+                widthExtent.EndCondition2,
+                widthExtent.DirToUse,
+                bendAllowance,
+                false,
+                (int)swSheetMetalReliefTypes_e.swSheetMetalReliefObround,
+                Mm(0.1),
+                Mm(0.1),
+                0.5,
+                true,
+                false,
+                true,
+                true);
+
+            partModel.ClearSelection2(true);
+            return feature;
+        }
+
+        private static SheetMetalBaseFlangeExtent GetSheetMetalBaseFlangeExtent(BusbarProfile profile, SheetMetalWidthSide side)
+        {
+            const int direction1 = 1;
+            double halfWidth = profile.Width / 2.0;
+
+            if (side == SheetMetalWidthSide.Positive)
             {
-                if (feat.GetTypeName2() == "RefPlane")
-                {
-                    foreach (string name in names)
-                    {
-                        if (feat.Name == name)
-                            return feat;
-                    }
+                return new SheetMetalBaseFlangeExtent(
+                    profile.Width,
+                    0.0,
+                    false,
+                    (int)swEndConditions_e.swEndCondBlind,
+                    (int)swEndConditions_e.swEndCondBlind,
+                    direction1,
+                    "Direction1");
+            }
 
-                    if (refPlaneIndex == 1)
-                        return feat;
+            if (side == SheetMetalWidthSide.Negative)
+            {
+                return new SheetMetalBaseFlangeExtent(
+                    profile.Width,
+                    0.0,
+                    true,
+                    (int)swEndConditions_e.swEndCondBlind,
+                    (int)swEndConditions_e.swEndCondBlind,
+                    direction1,
+                    "Direction1Flipped");
+            }
 
-                    refPlaneIndex++;
-                }
+            // Use SOLIDWORKS' real Mid Plane end condition.
+            // Setting Dist1/Dist2 to half width with Blind conditions is not the same as the UI "Mid Plane" option.
+            return new SheetMetalBaseFlangeExtent(
+                profile.Width,
+                0.0,
+                false,
+                (int)swEndConditions_e.swEndCondMidPlane,
+                (int)swEndConditions_e.swEndCondBlind,
+                direction1,
+                "MidPlane");
+        }
 
-                feat = feat.GetNextFeature() as Feature;
+        private static void RunSheetMetalOpenLineDemo(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly)
+        {
+            Console.WriteLine();
+            Console.WriteLine("===== Open-line sheet metal demo =====");
+
+            ModelDoc2 partModel = NewPartDocument(swApp);
+            ActivateDocument(swApp, partModel);
+
+            BusbarProfile profile = Settings.MainFeedProfile;
+            Feature baseFlange = CreateSheetMetalOpenLineBaseFlangeDemo(partModel, Mm(200.0), profile);
+
+            if (baseFlange != null)
+                baseFlange.Name = "Busbar_SheetMetal_OpenLine_Demo";
+
+            partModel.EditRebuild3();
+
+            string savePath = SaveDemoBusbarPart(partModel, assemblyModel, "Busbar_SheetMetal_OpenLine_Demo_" + profile.Label);
+            InsertDemoPartIntoAssembly(swApp, assemblyModel, assembly, savePath, "Busbar_SheetMetal_OpenLine_Demo_" + profile.Label);
+            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+        }
+
+        private static Feature CreateSheetMetalOpenLineBaseFlangeDemo(ModelDoc2 partModel, double lineLength, BusbarProfile profile)
+        {
+            Feature frontPlane = FindDefaultPlane(partModel, "Front");
+            if (frontPlane == null)
+                throw new Exception("Front plane was not found for open-line demo.");
+
+            partModel.ClearSelection2(true);
+            if (!frontPlane.Select2(false, 0))
+                throw new Exception("Failed to select front plane for open-line demo.");
+
+            SketchManager sketchManager = partModel.SketchManager;
+            sketchManager.InsertSketch(true);
+
+            bool sketchStillOpen = true;
+
+            try
+            {
+                double halfLength = lineLength / 2.0;
+                CreateLineOrThrow(
+                    sketchManager,
+                    new Point3(-halfLength, 0, 0),
+                    new Point3(halfLength, 0, 0),
+                    "open line demo");
+
+                Feature feature = CreateSheetMetalBaseFlangeFromActiveOpenProfile(partModel, profile);
+                sketchStillOpen = false;
+                partModel.ClearSelection2(true);
+
+                if (feature == null)
+                    throw new Exception("Open-line demo base flange creation failed.");
+
+                ApplySheetMetalParametersToCreatedFeature(feature, partModel, profile);
+                return feature;
+            }
+            finally
+            {
+                if (sketchStillOpen)
+                    sketchManager.InsertSketch(true);
+            }
+        }
+
+        private static void RunSheetMetalBentLineDemo(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly)
+        {
+            Console.WriteLine();
+            Console.WriteLine("===== Bent-line sheet metal demo =====");
+
+            ModelDoc2 partModel = NewPartDocument(swApp);
+            ActivateDocument(swApp, partModel);
+
+            BusbarProfile profile = Settings.MainFeedProfile;
+            Feature baseFlange = CreateSheetMetalBentLineBaseFlangeDemo(partModel, Mm(120.0), Mm(80.0), profile);
+
+            if (baseFlange != null)
+                baseFlange.Name = "Busbar_SheetMetal_BentLine_Demo";
+
+            partModel.EditRebuild3();
+
+            string savePath = SaveDemoBusbarPart(partModel, assemblyModel, "Busbar_SheetMetal_BentLine_Demo_" + profile.Label);
+            InsertDemoPartIntoAssembly(swApp, assemblyModel, assembly, savePath, "Busbar_SheetMetal_BentLine_Demo_" + profile.Label);
+            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+        }
+
+        private static Feature CreateSheetMetalBentLineBaseFlangeDemo(ModelDoc2 partModel, double firstLength, double secondLength, BusbarProfile profile)
+        {
+            Feature frontPlane = FindDefaultPlane(partModel, "Front");
+            if (frontPlane == null)
+                throw new Exception("Front plane was not found for bent-line demo.");
+
+            partModel.ClearSelection2(true);
+            if (!frontPlane.Select2(false, 0))
+                throw new Exception("Failed to select front plane for bent-line demo.");
+
+            SketchManager sketchManager = partModel.SketchManager;
+            sketchManager.InsertSketch(true);
+
+            bool sketchStillOpen = true;
+
+            try
+            {
+                Point3 p0 = new Point3(0, 0, 0);
+                Point3 p1 = new Point3(firstLength, 0, 0);
+                Point3 p2 = new Point3(firstLength, secondLength, 0);
+
+                CreateLineOrThrow(sketchManager, p0, p1, "bent line demo segment 1");
+                CreateLineOrThrow(sketchManager, p1, p2, "bent line demo segment 2");
+
+                Feature feature = CreateSheetMetalBaseFlangeFromActiveOpenProfile(partModel, profile);
+                sketchStillOpen = false;
+                partModel.ClearSelection2(true);
+
+                if (feature == null)
+                    throw new Exception("Bent-line demo base flange creation failed.");
+
+                ApplySheetMetalParametersToCreatedFeature(feature, partModel, profile);
+                return feature;
+            }
+            finally
+            {
+                if (sketchStillOpen)
+                    sketchManager.InsertSketch(true);
+            }
+        }
+
+        private static Sketch GetSketchFromFeature(Feature feature, string role)
+        {
+            if (feature == null)
+                throw new Exception("Missing " + role + " sketch feature.");
+
+            Sketch sketch = feature.GetSpecificFeature2() as Sketch;
+            if (sketch == null)
+                throw new Exception("Failed to get " + role + " sketch object.");
+
+            return sketch;
+        }
+
+        private static object GetSheetMetalPathObjects(BusbarPathSketchResult pathSketch)
+        {
+            if (pathSketch == null || pathSketch.Segments == null || pathSketch.Segments.Count == 0)
+                throw new Exception("Sheet metal swept flange path is empty.");
+
+            object[] sketchPaths = GetSketchPaths(pathSketch);
+            if (sketchPaths != null && sketchPaths.Length > 0)
+            {
+                Console.WriteLine("Sheet metal path mode: SketchPath x " + sketchPaths.Length);
+                return sketchPaths;
+            }
+
+            Console.WriteLine("Sheet metal path mode: SketchSegment x " + pathSketch.Segments.Count);
+            object[] pathObjects = new object[pathSketch.Segments.Count];
+            for (int i = 0; i < pathSketch.Segments.Count; i++)
+                pathObjects[i] = pathSketch.Segments[i];
+
+            return pathObjects;
+        }
+
+        private static object[] GetSketchPaths(BusbarPathSketchResult pathSketch)
+        {
+            if (pathSketch == null || pathSketch.Sketch == null)
+                return null;
+
+            object rawPaths = pathSketch.Sketch.GetSketchPaths();
+            return rawPaths as object[];
+        }
+
+        private static CustomBendAllowance CreateKFactorBendAllowance(FeatureManager featureManager)
+        {
+            CustomBendAllowance bendAllowance = featureManager.CreateCustomBendAllowance();
+            if (bendAllowance == null)
+                throw new Exception("Failed to create custom bend allowance.");
+
+            bendAllowance.Type = (int)swBendAllowanceTypes_e.swBendAllowanceKFactor;
+            bendAllowance.KFactor = Settings.SheetMetalKFactor;
+            return bendAllowance;
+        }
+
+        private static void ApplySheetMetalParametersToCreatedFeature(Feature createdFeature, ModelDoc2 partModel, BusbarProfile profile)
+        {
+            Feature sheetMetalFeature = FindFirstFeatureByType(partModel, "SheetMetal");
+            if (sheetMetalFeature == null)
+                return;
+
+            SheetMetalFeatureData sheetMetalData = sheetMetalFeature.GetDefinition() as SheetMetalFeatureData;
+            if (sheetMetalData == null)
+                return;
+
+            sheetMetalData.Thickness = profile.Thickness;
+            sheetMetalData.BendRadius = Settings.SheetMetalBendRadius;
+            sheetMetalData.BendAllowanceType = (int)swBendAllowanceTypes_e.swBendAllowanceKFactor;
+            sheetMetalData.KFactor = Settings.SheetMetalKFactor;
+            sheetMetalData.UseMaterialSheetMetalParameters = false;
+            sheetMetalData.UseAutoRelief = true;
+            sheetMetalData.AutoReliefType = (int)swSheetMetalReliefTypes_e.swSheetMetalReliefRectangular;
+            sheetMetalData.SetCustomBendAllowance(CreateKFactorBendAllowance(partModel.FeatureManager));
+            sheetMetalFeature.ModifyDefinition(sheetMetalData, partModel, null);
+        }
+
+        private static Feature FindFirstFeatureByType(ModelDoc2 model, string typeName)
+        {
+            Feature feature = model.FirstFeature() as Feature;
+
+            while (feature != null)
+            {
+                if (SameText(feature.GetTypeName2(), typeName))
+                    return feature;
+
+                feature = feature.GetNextFeature() as Feature;
             }
 
             return null;
         }
 
-        // 按角色查找默认基准面。
-        static Feature FindDefaultPlane(ModelDoc2 partModel, string role)
+        private static void CreateBusbarV2PreviewPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarPlanV2 plan)
         {
-            string[] names;
-            int fallbackIndex;
+            if (plan == null)
+                throw new Exception("Busbar V2 preview plan is null.");
 
-            if (SameText(role, "Right"))
-            {
-                names = new[] { "右视基准面", "Right Plane", "右基准面" };
-                fallbackIndex = 2;
-            }
-            else if (SameText(role, "Front"))
-            {
-                names = new[] { "前视基准面", "Front Plane", "前基准面" };
-                fallbackIndex = 0;
-            }
-            else
-            {
-                names = new[] { "上视基准面", "Top Plane", "上基准面" };
-                fallbackIndex = 1;
-            }
+            Console.WriteLine();
+            Console.WriteLine("===== Create Busbar V2 preview part =====");
+            Console.WriteLine("Collectors: " + plan.Collectors.Count);
+            Console.WriteLine("Busbars: " + plan.Busbars.Count);
+            Console.WriteLine("This preview creates sketch lines only. It does not create sheet metal solids.");
 
-            int refPlaneIndex = 0;
-            Feature feat = partModel.FirstFeature() as Feature;
+            ModelDoc2 partModel = NewPartDocument(swApp);
+            ActivateDocument(swApp, partModel);
 
-            while (feat != null)
+            CreateBusbarV2PreviewSketches(partModel, plan);
+            partModel.EditRebuild3();
+
+            string savePath = SaveDemoBusbarPart(partModel, assemblyModel, "Busbar_V2_Preview");
+            string componentName = Path.GetFileNameWithoutExtension(savePath);
+            InsertDemoPartIntoAssembly(swApp, assemblyModel, assembly, savePath, componentName);
+            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+
+            Console.WriteLine("Busbar V2 preview part inserted: " + componentName);
+            Console.WriteLine("Preview convention:");
+            Console.WriteLine("  Collector_*_Center sketches = planned collector centerlines.");
+            Console.WriteLine("  *_Logical sketches = hole-center route references.");
+            Console.WriteLine("  *_SheetMetal sketches = current sheet-metal sketch paths with end margins.");
+        }
+
+        private static void CreateBusbarV2PreviewSketches(ModelDoc2 partModel, BusbarPlanV2 plan)
+        {
+            foreach (CollectorLayoutV2 collector in plan.Collectors)
             {
-                if (feat.GetTypeName2() == "RefPlane")
+                List<Point3> points = new List<Point3>
                 {
-                    foreach (string name in names)
-                    {
-                        if (feat.Name == name)
-                            return feat;
-                    }
+                    new Point3(collector.StartX, collector.Center.Y, collector.Center.Z),
+                    new Point3(collector.EndX, collector.Center.Y, collector.Center.Z)
+                };
 
-                    if (refPlaneIndex == fallbackIndex)
-                        return feat;
+                CreatePreview3DPolylineSketch(
+                    partModel,
+                    "Preview_Collector_" + collector.Phase + "_Center",
+                    points,
+                    false);
+            }
 
-                    refPlaneIndex++;
+            foreach (BusbarV2 busbar in plan.Busbars)
+            {
+                string safeName = ToSafeFeatureName(busbar.Name);
+
+                CreatePreview3DPolylineSketch(
+                    partModel,
+                    "Preview_" + safeName + "_Logical",
+                    busbar.LogicalCenterline,
+                    true);
+
+                CreatePreview3DPolylineSketch(
+                    partModel,
+                    "Preview_" + safeName + "_SheetMetal",
+                    busbar.SheetMetalSketchLine,
+                    false);
+            }
+        }
+
+        private static Feature CreatePreview3DPolylineSketch(ModelDoc2 partModel, string sketchName, List<Point3> points, bool constructionGeometry)
+        {
+            if (points == null || points.Count < 2)
+                return null;
+
+            partModel.ClearSelection2(true);
+            SketchManager sketchManager = partModel.SketchManager;
+            bool sketchOpened = false;
+            int segmentCount = 0;
+
+            try
+            {
+                sketchManager.Insert3DSketch(true);
+                sketchOpened = true;
+
+                for (int i = 0; i < points.Count - 1; i++)
+                {
+                    if (points[i].DistanceTo(points[i + 1]) <= Mm(0.01))
+                        continue;
+
+                    SketchSegment segment = CreateLineOrThrow(
+                        sketchManager,
+                        points[i],
+                        points[i + 1],
+                        sketchName + " segment " + i);
+
+                    segment.ConstructionGeometry = constructionGeometry;
+                    segmentCount++;
+                }
+            }
+            finally
+            {
+                if (sketchOpened)
+                    sketchManager.Insert3DSketch(true);
+            }
+
+            if (segmentCount == 0)
+                return null;
+
+            Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
+            if (sketch == null)
+                throw new Exception("Preview sketch was created but could not be located: " + sketchName);
+
+            sketch.Name = sketchName;
+            return sketch;
+        }
+
+        private static string ToSafeFeatureName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "Unnamed";
+
+            char[] chars = name.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                char c = chars[i];
+                if (!char.IsLetterOrDigit(c) && c != '_')
+                    chars[i] = '_';
+            }
+
+            return new string(chars);
+        }
+
+        private static void CreateBusbarV2SheetMetalPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarV2 busbar)
+        {
+            if (busbar == null)
+                throw new Exception("Busbar V2 sheet metal target is null.");
+
+            if (busbar.SheetMetalSketchLine == null || busbar.SheetMetalSketchLine.Count < 2)
+                throw new Exception("Busbar V2 sheet metal sketch line is invalid: " + busbar.Name);
+
+            Console.WriteLine();
+            Console.WriteLine("===== Create Busbar V2 sheet metal part =====");
+            Console.WriteLine(busbar.Name + " / " + busbar.Profile.Label + "mm");
+            Console.WriteLine(
+                "Sheet metal: MidPlane, R=" + busbar.SheetMetal.BendRadiusMm.ToString("0.###") +
+                "mm, K=" + busbar.SheetMetal.KFactor.ToString("0.###"));
+
+            ModelDoc2 partModel = NewPartDocument(swApp);
+            ActivateDocument(swApp, partModel);
+
+            Feature feature = CreateBusbarV2SheetMetalFeature(swApp, partModel, busbar);
+            if (feature != null)
+                feature.Name = busbar.Name + "_SheetMetal";
+
+            CreateBusbarV2MountingHoles(swApp, partModel, busbar);
+            partModel.EditRebuild3();
+
+            string savePath = SaveBusbarV2SheetMetalPart(partModel, assemblyModel, busbar);
+            InsertDemoPartIntoAssembly(swApp, assemblyModel, assembly, savePath, Path.GetFileNameWithoutExtension(savePath));
+            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+
+            Console.WriteLine("Busbar V2 sheet metal part inserted: " + savePath);
+        }
+
+        private static Feature CreateBusbarV2SheetMetalFeature(SldWorks swApp, ModelDoc2 partModel, BusbarV2 busbar)
+        {
+            BusbarRoute route = new BusbarRoute
+            {
+                Name = busbar.Name,
+                Kind = busbar.Kind,
+                Profile = busbar.Profile,
+                CenterlinePoints = new List<Point3>(busbar.SheetMetalSketchLine)
+            };
+
+            SheetMetalOpenProfilePlane profilePlane = GetOpenProfilePlane(route);
+            Feature sketch = CreateV2SheetMetalOpenProfileSketch(swApp, partModel, busbar, profilePlane);
+            Feature feature = CreateSheetMetalBaseFlangeFromSelectedSketch(partModel, sketch, busbar.Profile, busbar.Kind);
+
+            if (feature == null)
+                throw new Exception("V2 open-profile base flange creation failed: " + busbar.Name);
+
+            ApplySheetMetalParametersToCreatedFeature(feature, partModel, busbar.Profile);
+            return feature;
+        }
+
+        private static void CreateBusbarV2MountingHoles(SldWorks swApp, ModelDoc2 partModel, BusbarV2 busbar)
+        {
+            CreateBusbarV2MountingHole(swApp, partModel, busbar, busbar.StartPort, "Start");
+            CreateBusbarV2MountingHole(swApp, partModel, busbar, busbar.EndPort, "End");
+        }
+
+        private static void CreateBusbarV2MountingHole(SldWorks swApp, ModelDoc2 partModel, BusbarV2 busbar, ConnectionPort port, string role)
+        {
+            if (port == null || port.HoleDiameterMm <= 0.0)
+                return;
+
+            Console.WriteLine(
+                "Create V2 mounting hole [" + role + "]: diameter=" +
+                port.HoleDiameterMm.ToString("0.###") +
+                "mm, face=" + port.RequiredFace +
+                ", center=" + port.HoleCenter.ToMillimeterText());
+
+            SheetMetalOpenProfilePlane holePlane = GetHoleSketchPlane(port);
+            Feature plane = CreateOffsetPlane(partModel, holePlane.BasePlaneRole, holePlane.Offset);
+            partModel.EditRebuild3();
+
+            partModel.ClearSelection2(true);
+            if (!plane.Select2(false, 0))
+                throw new Exception("Failed to select V2 hole sketch plane: " + busbar.Name + " " + role);
+
+            SketchManager sketchManager = partModel.SketchManager;
+            partModel.InsertSketch2(true);
+
+            bool sketchStillOpen = true;
+
+            try
+            {
+                Sketch activeSketch = sketchManager.ActiveSketch as Sketch;
+                if (activeSketch == null)
+                    activeSketch = partModel.GetActiveSketch2() as Sketch;
+
+                if (activeSketch == null)
+                    throw new Exception("Failed to get active V2 hole sketch: " + busbar.Name + " " + role);
+
+                MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
+                if (modelToSketch == null)
+                    throw new Exception("Failed to get V2 hole sketch transform: " + busbar.Name + " " + role);
+
+                Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(swApp, port.HoleCenter, modelToSketch));
+                double radius = Mm(port.HoleDiameterMm) / 2.0;
+                SketchSegment circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
+                if (circle == null)
+                    throw new Exception("Failed to create V2 mounting hole circle: " + busbar.Name + " " + role);
+
+                Feature activeSketchCut = CreateDirectedBlindCutFromActiveSketch(
+                    partModel,
+                    busbar.Name + "_HoleCut_" + role,
+                    port,
+                    busbar.Profile.Thickness);
+
+                if (activeSketchCut != null)
+                {
+                    sketchStillOpen = false;
+                    return;
                 }
 
-                feat = feat.GetNextFeature() as Feature;
+                partModel.InsertSketch2(true);
+                sketchStillOpen = false;
+            }
+            finally
+            {
+                if (sketchStillOpen)
+                    partModel.InsertSketch2(true);
             }
 
-            return null;
+            Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
+            if (sketch == null)
+                throw new Exception("V2 hole sketch was created but could not be located: " + busbar.Name + " " + role);
+
+            sketch.Name = busbar.Name + "_Hole_" + role;
+            partModel.EditRebuild3();
+
+            Feature cut = CreateDirectedBlindCutFromSketch(
+                partModel,
+                sketch,
+                busbar.Name + "_HoleCut_" + role,
+                port,
+                busbar.Profile.Thickness);
+            if (cut == null)
+                throw new Exception("Failed to create V2 mounting hole cut: " + busbar.Name + " " + role);
         }
 
-        // 执行扫掠生成铜排实体。
-        // Select2 的 Mark 很重要：1 表示截面，4 表示路径。
-        static Feature CreateSweepFeature(ModelDoc2 partModel, Feature profileSketch, Feature pathSketch)
+        private static SheetMetalOpenProfilePlane GetHoleSketchPlane(ConnectionPort port)
         {
-            // 选择标记是 Sweep API 的重点：
-            // Mark 1 = 扫掠截面 Profile
-            // Mark 4 = 扫掠路径 Path
-            Console.WriteLine("执行扫掠生成铜排实体...");
+            if (port.RequiredFace == ContactFace.Upper || port.RequiredFace == ContactFace.Lower)
+                return new SheetMetalOpenProfilePlane("Top", port.HoleCenter.Y, AxisDirection.X, AxisDirection.Z);
+
+            if (port.RequiredFace == ContactFace.Left || port.RequiredFace == ContactFace.Right)
+                return new SheetMetalOpenProfilePlane("Right", port.HoleCenter.X, AxisDirection.Y, AxisDirection.Z);
+
+            return new SheetMetalOpenProfilePlane("Front", port.HoleCenter.Z, AxisDirection.X, AxisDirection.Y);
+        }
+
+        private static Feature CreateDirectedBlindCutFromSketch(ModelDoc2 partModel, Feature sketch, string featureName, ConnectionPort port, double cutDepth)
+        {
+            bool reverseDirection = ShouldReverseHoleCutDirection(port);
+            Console.WriteLine(
+                "Create directed blind cut: " + featureName +
+                ", depth=" + ToMm(cutDepth).ToString("F3") +
+                " mm, face=" + port.RequiredFace +
+                ", reverseDirection=" + reverseDirection);
+
+            Feature cut = TryCreateBlindCut(partModel, sketch, featureName, cutDepth, reverseDirection, false, "DirectedBlind");
+            if (cut == null)
+                cut = TryCreateBlindCut(partModel, sketch, featureName, cutDepth, !reverseDirection, false, "DirectedBlindOpposite");
+            if (cut == null)
+                cut = TryCreateBlindCut(partModel, sketch, featureName, cutDepth, reverseDirection, true, "DirectedBlindNormalCut");
+            if (cut == null)
+                cut = TryCreateBlindCutWithScope(partModel, sketch, featureName, cutDepth, reverseDirection, false, false, false, false, false, "DirectedBlindNoScope");
+
+            return cut;
+        }
+
+        private static bool ShouldReverseHoleCutDirection(ConnectionPort port)
+        {
+            if (port.RequiredFace == ContactFace.Upper || port.RequiredFace == ContactFace.Left)
+                return true;
+
+            return false;
+        }
+
+        private static Feature TryCreateBlindCut(
+            ModelDoc2 partModel,
+            Feature sketch,
+            string featureName,
+            double cutDepth,
+            bool reverseDirection,
+            bool normalCut,
+            string modeLabel)
+        {
+            return TryCreateBlindCutWithScope(
+                partModel,
+                sketch,
+                featureName,
+                cutDepth,
+                reverseDirection,
+                normalCut,
+                true,
+                true,
+                true,
+                true,
+                modeLabel);
+        }
+
+        private static Feature TryCreateBlindCutWithScope(
+            ModelDoc2 partModel,
+            Feature sketch,
+            string featureName,
+            double cutDepth,
+            bool reverseDirection,
+            bool normalCut,
+            bool useFeatScope,
+            bool useAutoSelect,
+            bool assemblyFeatureScope,
+            bool autoSelectComponents,
+            string modeLabel)
+        {
+            if (!SelectSketchForCut(partModel, sketch))
+                throw new Exception("Failed to select cut sketch: " + featureName);
+
+            Feature cut = partModel.FeatureManager.FeatureCut4(
+                true,
+                false,
+                reverseDirection,
+                (int)swEndConditions_e.swEndCondBlind,
+                (int)swEndConditions_e.swEndCondBlind,
+                cutDepth,
+                cutDepth,
+                false,
+                false,
+                false,
+                false,
+                1.0,
+                1.0,
+                false,
+                false,
+                false,
+                false,
+                normalCut,
+                useFeatScope,
+                useAutoSelect,
+                assemblyFeatureScope,
+                autoSelectComponents,
+                false,
+                (int)swStartConditions_e.swStartSketchPlane,
+                0.0,
+                false,
+                false);
 
             partModel.ClearSelection2(true);
 
-            bool profileSelected = profileSketch.Select2(false, 1);
-            bool pathSelected = pathSketch.Select2(true, 4);
+            if (cut == null)
+                return null;
 
-            if (!profileSelected)
-                throw new Exception("扫掠前选择截面草图失败。");
-
-            if (!pathSelected)
-                throw new Exception("扫掠前选择路径草图失败。");
-
-            Feature sweep = partModel.FeatureManager.InsertProtrusionSwept4(
-                false,
-                false,
-                0,
-                true,
-                false,
-                0,
-                0,
-                false,
-                0,
-                0,
-                0,
-                0,
-                true,
-                false,
-                true,
-                0,
-                true,
-                false,
-                0,
-                0);
-
-            partModel.ClearSelection2(true);
-
-            if (sweep == null)
-                throw new Exception("扫掠失败。常见原因：截面草图未闭合，或截面没有垂直于路径起点。");
-
-            return sweep;
+            cut.Name = featureName;
+            Console.WriteLine("Created cut feature: " + featureName + ", mode=" + modeLabel);
+            return cut;
         }
 
-        // 保存新生成的铜排零件；优先保存到装配体所在目录。
-        static string SaveBusbarPart(ModelDoc2 partModel, ModelDoc2 asmModel, BusbarRoute route)
+        private static Feature CreateDirectedBlindCutFromActiveSketch(ModelDoc2 partModel, string featureName, ConnectionPort port, double cutDepth)
         {
-            // 铜排零件保存到装配体同目录。
-            // 如果装配体尚未保存，就临时保存到桌面。
-            string asmPath = asmModel.GetPathName();
-            string folder = string.IsNullOrWhiteSpace(asmPath)
+            bool reverseDirection = ShouldReverseHoleCutDirection(port);
+            Console.WriteLine(
+                "Try active-sketch blind cut: " + featureName +
+                ", depth=" + ToMm(cutDepth).ToString("F3") +
+                " mm, face=" + port.RequiredFace +
+                ", reverseDirection=" + reverseDirection);
+
+            Feature cut = TryCreateBlindCutFromCurrentSelection(partModel, featureName, cutDepth, reverseDirection, false, "ActiveSketchDirected");
+            if (cut == null)
+                cut = TryCreateBlindCutFromCurrentSelection(partModel, featureName, cutDepth, !reverseDirection, false, "ActiveSketchOpposite");
+            if (cut == null)
+                cut = TryCreateBlindCutFromCurrentSelection(partModel, featureName, cutDepth, reverseDirection, true, "ActiveSketchNormalCut");
+
+            return cut;
+        }
+
+        private static Feature TryCreateBlindCutFromCurrentSelection(
+            ModelDoc2 partModel,
+            string featureName,
+            double cutDepth,
+            bool reverseDirection,
+            bool normalCut,
+            string modeLabel)
+        {
+            Feature cut = partModel.FeatureManager.FeatureCut4(
+                true,
+                false,
+                reverseDirection,
+                (int)swEndConditions_e.swEndCondBlind,
+                (int)swEndConditions_e.swEndCondBlind,
+                cutDepth,
+                cutDepth,
+                false,
+                false,
+                false,
+                false,
+                1.0,
+                1.0,
+                false,
+                false,
+                false,
+                false,
+                normalCut,
+                false,
+                false,
+                false,
+                false,
+                false,
+                (int)swStartConditions_e.swStartSketchPlane,
+                0.0,
+                false,
+                false);
+
+            if (cut == null)
+                return null;
+
+            cut.Name = featureName;
+            Console.WriteLine("Created cut feature: " + featureName + ", mode=" + modeLabel);
+            return cut;
+        }
+
+        private static bool SelectSketchForCut(ModelDoc2 partModel, Feature sketch)
+        {
+            partModel.ClearSelection2(true);
+
+            bool selected = partModel.Extension.SelectByID2(
+                sketch.Name,
+                "SKETCH",
+                0.0,
+                0.0,
+                0.0,
+                false,
+                0,
+                null,
+                (int)swSelectOption_e.swSelectOptionDefault);
+
+            if (!selected)
+            {
+                partModel.ClearSelection2(true);
+                selected = sketch.Select2(false, 0);
+            }
+
+            return selected;
+        }
+
+        private static Feature CreateV2SheetMetalOpenProfileSketch(SldWorks swApp, ModelDoc2 partModel, BusbarV2 busbar, SheetMetalOpenProfilePlane profilePlane)
+        {
+            Console.WriteLine(
+                "V2 sheet-metal sketch plane: " +
+                profilePlane.BasePlaneRole +
+                " offset=" + ToMm(profilePlane.Offset).ToString("F3") + " mm");
+
+            Feature plane = CreateOffsetPlane(partModel, profilePlane.BasePlaneRole, profilePlane.Offset);
+
+            partModel.ClearSelection2(true);
+            if (!plane.Select2(false, 0))
+                throw new Exception("Failed to select V2 sheet-metal sketch plane: " + busbar.Name);
+
+            SketchManager sketchManager = partModel.SketchManager;
+            sketchManager.InsertSketch(true);
+
+            bool sketchStillOpen = true;
+
+            try
+            {
+                Sketch activeSketch = partModel.GetActiveSketch2() as Sketch;
+                if (activeSketch == null)
+                    throw new Exception("Failed to get active V2 sheet-metal sketch: " + busbar.Name);
+
+                MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
+                if (modelToSketch == null)
+                    throw new Exception("Failed to get V2 sheet-metal ModelToSketchTransform: " + busbar.Name);
+
+                for (int i = 0; i < busbar.SheetMetalSketchLine.Count - 1; i++)
+                {
+                    Point3 p1 = FlattenSketchPoint(ModelPointToSketchPoint(swApp, busbar.SheetMetalSketchLine[i], modelToSketch));
+                    Point3 p2 = FlattenSketchPoint(ModelPointToSketchPoint(swApp, busbar.SheetMetalSketchLine[i + 1], modelToSketch));
+                    CreateLineOrThrow(sketchManager, p1, p2, "v2 sheet-metal segment " + i);
+                }
+
+                sketchManager.InsertSketch(true);
+                sketchStillOpen = false;
+            }
+            finally
+            {
+                if (sketchStillOpen)
+                    sketchManager.InsertSketch(true);
+            }
+
+            Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
+            if (sketch == null)
+                throw new Exception("V2 sheet-metal sketch was created but could not be located.");
+
+            sketch.Name = busbar.Name + "_V2_OpenProfile";
+            return sketch;
+        }
+
+        private static string SaveBusbarV2SheetMetalPart(ModelDoc2 partModel, ModelDoc2 assemblyModel, BusbarV2 busbar)
+        {
+            string assemblyPath = assemblyModel.GetPathName();
+            string folder = string.IsNullOrWhiteSpace(assemblyPath)
                 ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
-                : System.IO.Path.GetDirectoryName(asmPath);
+                : Path.GetDirectoryName(assemblyPath);
 
-            BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
-            string savePath = System.IO.Path.Combine(folder, route.Name + "_" + profile.Label + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
+            string savePath = Path.Combine(folder, busbar.Name + "_V2SheetMetal_" + busbar.Profile.Label + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
 
             int errors = 0;
             int warnings = 0;
@@ -1320,28 +2188,47 @@ namespace SwFeatureDebug
                 ref warnings);
 
             if (!ok || errors != 0)
-                throw new Exception("保存铜排零件失败。Errors=" + errors + ", Warnings=" + warnings);
+                throw new Exception("Failed to save V2 sheet metal part. Errors=" + errors + ", Warnings=" + warnings);
 
-            Console.WriteLine("铜排零件已保存：" + savePath);
             return savePath;
         }
 
-        // 把铜排零件插入当前装配体。
-        // 因为零件几何已经按装配体坐标建好，所以组件变换设为 identity。
-        static void InsertBusbarPartIntoAssembly(SldWorks swApp, ModelDoc2 asmModel, AssemblyDoc asm, string partPath, BusbarRoute route)
+        private static string SaveDemoBusbarPart(ModelDoc2 partModel, ModelDoc2 assemblyModel, string baseName)
         {
-            // 新零件内部几何已经使用装配体全局坐标建好。
-            // 因此插入装配体后，把组件 Transform2 设为 identity 即可对齐。
-            Console.WriteLine("插入铜排零件到当前装配体...");
+            string assemblyPath = assemblyModel.GetPathName();
+            string folder = string.IsNullOrWhiteSpace(assemblyPath)
+                ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
+                : Path.GetDirectoryName(assemblyPath);
 
-            ActivateDocument(swApp, asmModel);
+            string savePath = Path.Combine(folder, baseName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
 
-            Component2 comp = asm.AddComponent5(partPath, 0, "", false, "", 0, 0, 0);
-            if (comp == null)
-                throw new Exception("插入铜排零件失败。");
+            int errors = 0;
+            int warnings = 0;
 
-            MathUtility mu = (MathUtility)swApp.GetMathUtility();
-            MathTransform identity = (MathTransform)mu.CreateTransform(new double[]
+            bool ok = partModel.Extension.SaveAs(
+                savePath,
+                (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                null,
+                ref errors,
+                ref warnings);
+
+            if (!ok || errors != 0)
+                throw new Exception("Failed to save demo sheet metal part. Errors=" + errors + ", Warnings=" + warnings);
+
+            return savePath;
+        }
+
+        private static void InsertDemoPartIntoAssembly(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, string partPath, string componentName)
+        {
+            ActivateDocument(swApp, assemblyModel);
+
+            Component2 component = assembly.AddComponent5(partPath, 0, "", false, "", 0, 0, 0);
+            if (component == null)
+                throw new Exception("Failed to insert demo part into assembly.");
+
+            MathUtility utility = (MathUtility)swApp.GetMathUtility();
+            MathTransform identity = (MathTransform)utility.CreateTransform(new double[]
             {
                 1, 0, 0,
                 0, 1, 0,
@@ -1350,15 +2237,63 @@ namespace SwFeatureDebug
                 1, 0, 0, 0
             });
 
-            comp.Transform2 = identity;
-            BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
-            comp.Name2 = route.Name + "_" + profile.Label;
-            asmModel.EditRebuild3();
+            component.Transform2 = identity;
+            component.Name2 = componentName;
+            assemblyModel.EditRebuild3();
         }
 
-        // 保存并插入完成后关闭新建的铜排零件文档，避免 SolidWorks 后台堆积大量零件页面。
-        // 注意：这里只关闭刚刚新建的 .SLDPRT 文档，不删除磁盘文件，也不移除装配体中的铜排组件。
-        static void CloseBusbarPartDocument(SldWorks swApp, ModelDoc2 asmModel, ModelDoc2 partModel)
+        private static string SaveBusbarPart(ModelDoc2 partModel, ModelDoc2 assemblyModel, BusbarRoute route)
+        {
+            string assemblyPath = assemblyModel.GetPathName();
+            string folder = string.IsNullOrWhiteSpace(assemblyPath)
+                ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
+                : Path.GetDirectoryName(assemblyPath);
+
+            BusbarProfile profile = route.Profile ?? Settings.GetProfile(route.Kind);
+            string savePath = Path.Combine(folder, route.Name + "_" + profile.Label + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
+
+            int errors = 0;
+            int warnings = 0;
+
+            bool ok = partModel.Extension.SaveAs(
+                savePath,
+                (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                null,
+                ref errors,
+                ref warnings);
+
+            if (!ok || errors != 0)
+                throw new Exception("Failed to save busbar part. Errors=" + errors + ", Warnings=" + warnings);
+
+            Console.WriteLine("Busbar part saved: " + savePath);
+            return savePath;
+        }
+
+        private static void InsertBusbarPartIntoAssembly(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, string partPath, BusbarRoute route)
+        {
+            ActivateDocument(swApp, assemblyModel);
+
+            Component2 component = assembly.AddComponent5(partPath, 0, "", false, "", 0, 0, 0);
+            if (component == null)
+                throw new Exception("Failed to insert busbar part into assembly.");
+
+            MathUtility utility = (MathUtility)swApp.GetMathUtility();
+            MathTransform identity = (MathTransform)utility.CreateTransform(new double[]
+            {
+                1, 0, 0,
+                0, 1, 0,
+                0, 0, 1,
+                0, 0, 0,
+                1, 0, 0, 0
+            });
+
+            component.Transform2 = identity;
+            component.Name2 = route.Name + "_" + (route.Profile ?? Settings.GetProfile(route.Kind)).Label;
+            assemblyModel.EditRebuild3();
+        }
+
+        private static void CloseBusbarPartDocument(SldWorks swApp, ModelDoc2 assemblyModel, ModelDoc2 partModel)
         {
             if (partModel == null)
                 return;
@@ -1367,86 +2302,41 @@ namespace SwFeatureDebug
             if (string.IsNullOrWhiteSpace(partTitle))
                 return;
 
-            Console.WriteLine("关闭铜排零件窗口：" + partTitle);
-
-            // 先切回装配体，再按标题关闭零件，避免当前活动文档被关掉后焦点混乱。
-            ActivateDocument(swApp, asmModel);
+            ActivateDocument(swApp, assemblyModel);
             swApp.CloseDoc(partTitle);
-            ActivateDocument(swApp, asmModel);
+            ActivateDocument(swApp, assemblyModel);
         }
 
-        // 激活指定文档，确保后续 SketchManager / FeatureManager 操作作用在正确文档上。
-        static void ActivateDocument(SldWorks swApp, ModelDoc2 model)
+        private static void ActivateDocument(SldWorks swApp, ModelDoc2 model)
         {
             int errors = 0;
             swApp.ActivateDoc3(model.GetTitle(), false, 0, ref errors);
         }
 
-        // 判断参考点名是否匹配，例如 B_OUT、B_IN。
-        static bool PointNameEquals(FoundPoint point, string pointName)
+        private static bool SameText(string left, string right)
         {
-            return SameText(point.PointName, pointName);
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
         }
 
-        // 判断某个组件里是否存在指定参考点。
-        static bool ComponentHasPoint(List<FoundPoint> points, string componentName, string pointName)
-        {
-            foreach (FoundPoint point in points)
-            {
-                if (SameText(point.ComponentName, componentName) && SameText(point.PointName, pointName))
-                    return true;
-            }
-
-            return false;
-        }
-
-        // 统计某个组件里以指定后缀结尾的点数量，例如 *_OUT。
-        // 用于辅助判断哪个组件更像刀熔开关。
-        static int CountComponentPointsEndingWith(List<FoundPoint> points, string componentName, string suffix)
-        {
-            int count = 0;
-
-            foreach (FoundPoint point in points)
-            {
-                if (!SameText(point.ComponentName, componentName))
-                    continue;
-
-                if (point.PointName != null && point.PointName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                    count++;
-            }
-
-            return count;
-        }
-
-        // 忽略大小写比较字符串。
-        static bool SameText(string a, string b)
-        {
-            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
-        }
-
-        // 按 mm 输出路径点，便于和 SolidWorks 里标注的坐标核对。
-        static void PrintPathPoint(string label, Point3 p)
-        {
-            Console.WriteLine($"{label,-28} X={p.X * 1000:F3} mm, Y={p.Y * 1000:F3} mm, Z={p.Z * 1000:F3} mm");
-        }
-
-        // mm -> m。SolidWorks API 长度单位是米。
-        static double Mm(double value)
+        private static double Mm(double value)
         {
             return value / 1000.0;
         }
 
-        // m -> mm。用于控制台输出。
-        static double ToMm(double value)
+        private static double ToMm(double value)
         {
             return value * 1000.0;
         }
+
+        private static void PrintPathPoint(string label, Point3 point)
+        {
+            Console.WriteLine(label + " X=" + ToMm(point.X).ToString("F3") + " mm, Y=" + ToMm(point.Y).ToString("F3") + " mm, Z=" + ToMm(point.Z).ToString("F3") + " mm");
+        }
     }
 
-    // 铜排生成参数：用户主要改规格和端子偏移方向，其他路径距离由规格自动推导。
     internal class BusbarSettings
     {
-        // 三类铜排规格，单位 mm。
+        public BusbarModelingMode ModelingMode;
         public double MainFeedWidthMm;
         public double MainFeedThicknessMm;
         public double CollectorWidthMm;
@@ -1454,35 +2344,37 @@ namespace SwFeatureDebug
         public double BranchWidthMm;
         public double BranchThicknessMm;
 
-        // 参考点到扫掠中心线的 Z 向偏移符号。
-        // 偏移距离由对应铜排规格的 Thickness / 2 决定。
         public int StartTerminalOffsetZSign;
         public int EndTerminalOffsetZSign;
 
-        // 复杂拓扑初版参数：三相汇流排沿 Y 排列，分支从汇流排下接到漏保。
         public double CollectorPhaseSpacingMm;
         public double CollectorTopClearanceYMm;
         public double CollectorOffsetFromLoubaoInZMm;
         public double MainLeadOutYMm;
-        public double BranchApproachYMm;
         public CollectorLapSide MainCollectorLapSide;
+        public CollectorLapSide BranchCollectorLapSide;
+        public double SheetMetalBendRadiusMm;
+        public double SheetMetalKFactor;
+        public int SheetMetalFlangePosition;
+        public bool SheetMetalReverseDirection;
+        public bool SheetMetalThickenDirection;
+        public SheetMetalWidthSide MainFeedSheetMetalWidthSide;
+        public SheetMetalWidthSide CollectorSheetMetalWidthSide;
+        public SheetMetalWidthSide BranchSheetMetalWidthSide;
         public double MainCollectorFrontClearanceMm;
         public double MainCollectorLapDepthRatio;
+        public bool ReverseBranchOpenProfileSketchDirection;
 
         public BusbarProfile MainFeedProfile { get { return new BusbarProfile(MainFeedWidthMm, MainFeedThicknessMm); } }
         public BusbarProfile CollectorProfile { get { return new BusbarProfile(CollectorWidthMm, CollectorThicknessMm); } }
         public BusbarProfile BranchProfile { get { return new BusbarProfile(BranchWidthMm, BranchThicknessMm); } }
 
-        // 旧的单根点对点调试函数继续默认使用转接排规格。
-        public double BusbarWidth { get { return MainFeedProfile.Width; } }
-        public double BusbarThickness { get { return MainFeedProfile.Thickness; } }
-        public double TerminalFaceOffset { get { return MainFeedProfile.TerminalFaceOffset; } }
         public double CollectorPhaseSpacing { get { return Mm(CollectorPhaseSpacingMm); } }
         public double CollectorTopClearanceY { get { return Mm(CollectorTopClearanceYMm); } }
         public double CollectorOffsetFromLoubaoInZ { get { return Mm(CollectorOffsetFromLoubaoInZMm); } }
         public double MainLeadOutY { get { return Mm(MainLeadOutYMm); } }
-        public double BranchApproachY { get { return Mm(BranchApproachYMm); } }
         public double MainCollectorFrontClearance { get { return Mm(MainCollectorFrontClearanceMm); } }
+        public double SheetMetalBendRadius { get { return Mm(SheetMetalBendRadiusMm); } }
 
         public BusbarProfile GetProfile(BusbarKind kind)
         {
@@ -1495,6 +2387,17 @@ namespace SwFeatureDebug
             return MainFeedProfile;
         }
 
+        public SheetMetalWidthSide GetSheetMetalWidthSide(BusbarKind kind)
+        {
+            if (kind == BusbarKind.Collector)
+                return CollectorSheetMetalWidthSide;
+
+            if (kind == BusbarKind.Branch)
+                return BranchSheetMetalWidthSide;
+
+            return MainFeedSheetMetalWidthSide;
+        }
+
         public double GetCollectorFrontZOffset()
         {
             return CollectorProfile.Width / 2.0 + MainCollectorFrontClearance;
@@ -1502,7 +2405,8 @@ namespace SwFeatureDebug
 
         public double GetMainCollectorLapDepth()
         {
-            return CollectorProfile.Width * MainCollectorLapDepthRatio;
+            double overlapWindow = Math.Min(CollectorProfile.Width, MainFeedProfile.Width);
+            return overlapWindow * MainCollectorLapDepthRatio;
         }
 
         public double GetMainCollectorLapYOffset()
@@ -1511,61 +2415,30 @@ namespace SwFeatureDebug
             return MainCollectorLapSide == CollectorLapSide.Upper ? offset : -offset;
         }
 
-        // 以下路径参数由规格自动推导，不需要单独修改。
-        public double LeadY
+        public double GetBranchCollectorLapYOffset()
         {
-            get { return Math.Max(BusbarWidth * 0.50, BusbarThickness * 4.0); }
-        }
-
-        public double FirstDropZ
-        {
-            get { return Math.Max(BusbarWidth, BusbarThickness * 8.0); }
-        }
-
-        public double EndAboveZ
-        {
-            get { return Math.Max(BusbarWidth * 0.50, BusbarThickness * 4.0); }
-        }
-
-        public string ProfileLabel
-        {
-            get { return MainFeedProfile.Label; }
+            double offset = CollectorProfile.Thickness / 2.0 + BranchProfile.Thickness / 2.0;
+            return BranchCollectorLapSide == CollectorLapSide.Upper ? offset : -offset;
         }
 
         private static double Mm(double value)
         {
             return value / 1000.0;
         }
-
-        private static string FormatMm(double value)
-        {
-            return value.ToString("0.###");
-        }
     }
 
-    // 一个已经识别到的命名参考点，坐标统一保存为装配体全局坐标。
     internal class FoundPoint
     {
-        // 保存已经转换到装配体全局坐标系下的参考点。
         public string ComponentName;
         public string PointName;
         public Point3 Position;
 
         public override string ToString()
         {
-            return $"{ComponentName}.{PointName}  X={Position.X * 1000:F3} mm, Y={Position.Y * 1000:F3} mm, Z={Position.Z * 1000:F3} mm";
+            return ComponentName + "." + PointName + " " + Position.ToMillimeterText();
         }
     }
 
-    // 一组铜排连接关系：Start 是刀熔输出点，End 是漏保输入点。
-    internal class BusbarConnection
-    {
-        // 自动识别出来的一组连接关系：刀熔输出点 -> 漏保输入点。
-        public FoundPoint Start;
-        public FoundPoint End;
-    }
-
-    // 铜排类型：主连接排、汇流排、漏保分支排。
     internal enum BusbarKind
     {
         MainFeed,
@@ -1573,15 +2446,25 @@ namespace SwFeatureDebug
         Branch
     }
 
-    // 转接排与汇流排的搭接方式。
-    // Upper：转接排搭在汇流排上端；Lower：转接排搭在汇流排下端。
+    internal enum BusbarModelingMode
+    {
+        SheetMetalBaseFlangeOpenProfile,
+        SheetMetalSweptFlange
+    }
+
+    internal enum SheetMetalWidthSide
+    {
+        Center,
+        Positive,
+        Negative
+    }
+
     internal enum CollectorLapSide
     {
         Upper,
         Lower
     }
 
-    // 路径首段主方向，用于决定截面草图所在平面。
     internal enum AxisDirection
     {
         X,
@@ -1589,18 +2472,66 @@ namespace SwFeatureDebug
         Z
     }
 
-    // 一条待生成的铜排路径。后续所有扫掠建模都只依赖这个对象。
     internal class BusbarRoute
     {
         public string Name;
-        public string Phase;
         public BusbarKind Kind;
         public BusbarProfile Profile;
         public List<Point3> CenterlinePoints;
     }
 
-    // 铜排截面规格。
-    // Width/Thickness 已转换为 SolidWorks API 使用的米；Label 仍按 mm 显示。
+    internal class BusbarPathSketchResult
+    {
+        public Feature Feature;
+        public Sketch Sketch;
+        public List<SketchSegment> Segments;
+    }
+
+    internal class SheetMetalOpenProfilePlane
+    {
+        public string BasePlaneRole;
+        public double Offset;
+        public AxisDirection SketchAxis1;
+        public AxisDirection SketchAxis2;
+
+        public SheetMetalOpenProfilePlane(string basePlaneRole, double offset, AxisDirection sketchAxis1, AxisDirection sketchAxis2)
+        {
+            BasePlaneRole = basePlaneRole;
+            Offset = offset;
+            SketchAxis1 = sketchAxis1;
+            SketchAxis2 = sketchAxis2;
+        }
+    }
+
+    internal class SheetMetalBaseFlangeExtent
+    {
+        public double Dist1;
+        public double Dist2;
+        public bool FlipExtrudeDirection;
+        public int EndCondition1;
+        public int EndCondition2;
+        public int DirToUse;
+        public string ModeLabel;
+
+        public SheetMetalBaseFlangeExtent(
+            double dist1,
+            double dist2,
+            bool flipExtrudeDirection,
+            int endCondition1,
+            int endCondition2,
+            int dirToUse,
+            string modeLabel)
+        {
+            Dist1 = dist1;
+            Dist2 = dist2;
+            FlipExtrudeDirection = flipExtrudeDirection;
+            EndCondition1 = endCondition1;
+            EndCondition2 = endCondition2;
+            DirToUse = dirToUse;
+            ModeLabel = modeLabel;
+        }
+    }
+
     internal class BusbarProfile
     {
         public double WidthMm;
@@ -1623,38 +2554,29 @@ namespace SwFeatureDebug
         }
     }
 
-    // 某一相汇流排的几何布置参数。
     internal class CollectorLayout
     {
-        public string Phase;
         public double Y;
         public double Z;
         public double StartX;
         public double EndX;
-        public double MainTapX;
     }
 
-    // 主连接排搭接汇流排时的联动计算结果。
-    // 只要汇流排宽度/厚度变化，这里的 FrontZ、EndZ、Y 都会跟着变化。
     internal class MainCollectorLapLayout
     {
         public double Y;
         public double FrontZ;
         public double EndZ;
-        public double Depth;
     }
 
-    // 一个漏保组件的摘要信息，用于排序和取点。
     internal class LoubaoGroup
     {
         public string ComponentName;
         public double CenterX;
     }
 
-    // 三维点结构，单位为米，对应 SolidWorks API 的长度单位。
     internal struct Point3
     {
-        // SolidWorks API 使用米作为长度单位。
         public double X;
         public double Y;
         public double Z;
@@ -1672,6 +2594,11 @@ namespace SwFeatureDebug
             double dy = Y - other.Y;
             double dz = Z - other.Z;
             return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        public string ToMillimeterText()
+        {
+            return "X=" + (X * 1000.0).ToString("F3") + " mm, Y=" + (Y * 1000.0).ToString("F3") + " mm, Z=" + (Z * 1000.0).ToString("F3") + " mm";
         }
     }
 }

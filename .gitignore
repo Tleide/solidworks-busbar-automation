@@ -8,6 +8,10 @@ obj/
 *.pdb
 *.exe
 *.dll
+*.opendb
+*.VC.db
+FileContentIndex/
+CopilotIndices/
 
 # Keep manually collected SolidWorks interop DLLs for this learning project.
 !C#/TopToDown/ReferenceDLL/*.dll
@@ -27,9 +31,6 @@ SWtopToDown/Busbar_*.SLDPRT
 SWtopToDown/Busbar_*.sldprt
 !SWtopToDown/Busbar_Skeleton.SLDPRT
 !SWtopToDown/Busbar_Skeleton.sldprt
-
-# Demo media can be large; keep source/project history light.
-demo/*.mp4
 
 # OS files
 Thumbs.db

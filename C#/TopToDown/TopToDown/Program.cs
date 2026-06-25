@@ -28,6 +28,7 @@ namespace SwFeatureDebug
             CollectorPhaseSpacingMm = 60.0,
             CollectorTopClearanceYMm = 180.0,
             CollectorOffsetFromLoubaoInZMm = 120.0,
+            CollectorNegativeXExtendMm = 50.0,
 
             MainLeadOutYMm = 40.0,
 
@@ -61,6 +62,7 @@ namespace SwFeatureDebug
         private static bool _runPlanningDemoV2FromAssemblyOnly;
         private static bool _runPreviewDemoV2FromAssemblyOnly;
         private static bool _runSheetMetalV2FirstMainFromAssemblyOnly;
+        private static bool _runSheetMetalV2AllFromAssemblyOnly;
 
         [STAThread]
         private static void Main(string[] args)
@@ -117,6 +119,23 @@ namespace SwFeatureDebug
                     CreateBusbarV2SheetMetalPart(swApp, model, assembly, busbar);
                     Console.WriteLine();
                     Console.WriteLine("Busbar V2 first main-feed sheet metal test complete. Press any key to exit.");
+                    if (!Console.IsInputRedirected)
+                        Console.ReadKey();
+                    return;
+                }
+
+                if (_runSheetMetalV2AllFromAssemblyOnly)
+                {
+                    if (_replaceExistingBusbar)
+                        DeleteExistingBusbarComponents(model, assembly);
+
+                    List<FoundPoint> scannedPoints = ScanReferencePoints(swApp, model, assembly);
+                    BusbarPlanV2 plan = BusbarPlanningDemoV2.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, Settings);
+                    List<BusbarV2> busbars = SelectBusbarsForV2SheetMetalBatch(plan);
+
+                    CreateBusbarV2SheetMetalParts(swApp, model, assembly, busbars);
+                    Console.WriteLine();
+                    Console.WriteLine("Busbar V2 3+3+9 sheet metal generation complete. Press any key to exit.");
                     if (!Console.IsInputRedirected)
                         Console.ReadKey();
                     return;
@@ -243,6 +262,12 @@ namespace SwFeatureDebug
                 if (SameText(arg, "--sheetmetal-v2-first-main"))
                 {
                     _runSheetMetalV2FirstMainFromAssemblyOnly = true;
+                    continue;
+                }
+
+                if (SameText(arg, "--sheetmetal-v2-all"))
+                {
+                    _runSheetMetalV2AllFromAssemblyOnly = true;
                     continue;
                 }
 
@@ -1771,6 +1796,74 @@ namespace SwFeatureDebug
             return new string(chars);
         }
 
+        private static List<BusbarV2> SelectBusbarsForV2SheetMetalBatch(BusbarPlanV2 plan)
+        {
+            if (plan == null)
+                throw new Exception("Busbar V2 batch plan is null.");
+
+            List<BusbarV2> selected = new List<BusbarV2>();
+
+            foreach (string phase in PhaseNames)
+                selected.Add(FindRequiredV2Busbar(plan, phase, BusbarKind.MainFeed));
+
+            foreach (string phase in PhaseNames)
+                selected.Add(FindRequiredV2Busbar(plan, phase, BusbarKind.Collector));
+
+            foreach (string phase in PhaseNames)
+                selected.AddRange(FindV2Busbars(plan, phase, BusbarKind.Branch));
+
+            Console.WriteLine();
+            Console.WriteLine("===== V2 sheet metal batch selection =====");
+            Console.WriteLine("Target count: 3 MainFeed + 3 Collector + 9 Branch = " + selected.Count);
+            foreach (BusbarV2 busbar in selected)
+                Console.WriteLine("  " + busbar.Name + " [" + busbar.Kind + "] " + busbar.Profile.Label + "mm");
+
+            return selected;
+        }
+
+        private static BusbarV2 FindRequiredV2Busbar(BusbarPlanV2 plan, string phase, BusbarKind kind)
+        {
+            string phasePrefix = "Busbar_" + phase + "_";
+
+            BusbarV2 busbar = plan.Busbars
+                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (busbar == null)
+                throw new Exception("No V2 " + kind + " busbar was planned for phase " + phase + ".");
+
+            return busbar;
+        }
+
+        private static List<BusbarV2> FindV2Busbars(BusbarPlanV2 plan, string phase, BusbarKind kind)
+        {
+            string phasePrefix = "Busbar_" + phase + "_";
+
+            List<BusbarV2> busbars = plan.Busbars
+                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (busbars.Count == 0)
+                throw new Exception("No V2 " + kind + " busbars were planned for phase " + phase + ".");
+
+            return busbars;
+        }
+
+        private static void CreateBusbarV2SheetMetalParts(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, List<BusbarV2> busbars)
+        {
+            if (busbars == null || busbars.Count == 0)
+                throw new Exception("No V2 sheet metal busbars were selected for generation.");
+
+            for (int i = 0; i < busbars.Count; i++)
+            {
+                Console.WriteLine();
+                Console.WriteLine("V2 batch item " + (i + 1) + " / " + busbars.Count);
+                CreateBusbarV2SheetMetalPart(swApp, assemblyModel, assembly, busbars[i]);
+            }
+        }
+
         private static void CreateBusbarV2SheetMetalPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarV2 busbar)
         {
             if (busbar == null)
@@ -1826,6 +1919,14 @@ namespace SwFeatureDebug
 
         private static void CreateBusbarV2MountingHoles(SldWorks swApp, ModelDoc2 partModel, BusbarV2 busbar)
         {
+            if (busbar.MountingPorts != null && busbar.MountingPorts.Count > 0)
+            {
+                for (int i = 0; i < busbar.MountingPorts.Count; i++)
+                    CreateBusbarV2MountingHole(swApp, partModel, busbar, busbar.MountingPorts[i], "P" + (i + 1));
+
+                return;
+            }
+
             CreateBusbarV2MountingHole(swApp, partModel, busbar, busbar.StartPort, "Start");
             CreateBusbarV2MountingHole(swApp, partModel, busbar, busbar.EndPort, "End");
         }
@@ -2350,6 +2451,7 @@ namespace SwFeatureDebug
         public double CollectorPhaseSpacingMm;
         public double CollectorTopClearanceYMm;
         public double CollectorOffsetFromLoubaoInZMm;
+        public double CollectorNegativeXExtendMm;
         public double MainLeadOutYMm;
         public CollectorLapSide MainCollectorLapSide;
         public CollectorLapSide BranchCollectorLapSide;
@@ -2372,6 +2474,7 @@ namespace SwFeatureDebug
         public double CollectorPhaseSpacing { get { return Mm(CollectorPhaseSpacingMm); } }
         public double CollectorTopClearanceY { get { return Mm(CollectorTopClearanceYMm); } }
         public double CollectorOffsetFromLoubaoInZ { get { return Mm(CollectorOffsetFromLoubaoInZMm); } }
+        public double CollectorNegativeXExtend { get { return Mm(CollectorNegativeXExtendMm); } }
         public double MainLeadOutY { get { return Mm(MainLeadOutYMm); } }
         public double MainCollectorFrontClearance { get { return Mm(MainCollectorFrontClearanceMm); } }
         public double SheetMetalBendRadius { get { return Mm(SheetMetalBendRadiusMm); } }

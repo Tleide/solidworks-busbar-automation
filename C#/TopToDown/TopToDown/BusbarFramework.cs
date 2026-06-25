@@ -32,6 +32,12 @@ namespace SwFeatureDebug
         Auto
     }
 
+    internal enum ContactTopologyKind
+    {
+        SameSide,
+        DifferentSide
+    }
+
     internal enum PortKind
     {
         FuseOut,
@@ -60,6 +66,9 @@ namespace SwFeatureDebug
         public double MainFeedCollectorEndMarginRatio;
         public double MainFeedStartHoleDiameterMm;
         public double MainFeedCollectorHoleDiameterMm;
+        public double BranchStartHoleDiameterMm;
+        public double BranchCollectorHoleDiameterMm;
+        public double CollectorTapHoleDiameterMm;
 
         public static ManualBusbarRuleSet CreateDefault(CabinetTopologyKind topologyKind)
         {
@@ -77,7 +86,10 @@ namespace SwFeatureDebug
                 MainFeedStartEndMarginMm = 30.0,
                 MainFeedCollectorEndMarginRatio = 0.5,
                 MainFeedStartHoleDiameterMm = 13.0,
-                MainFeedCollectorHoleDiameterMm = 13.0
+                MainFeedCollectorHoleDiameterMm = 13.0,
+                BranchStartHoleDiameterMm = 13.0,
+                BranchCollectorHoleDiameterMm = 13.0,
+                CollectorTapHoleDiameterMm = 13.0
             };
         }
 
@@ -158,6 +170,7 @@ namespace SwFeatureDebug
         public SheetMetalOptions SheetMetal;
         public List<Point3> LogicalCenterline = new List<Point3>();
         public List<Point3> SheetMetalSketchLine = new List<Point3>();
+        public List<ConnectionPort> MountingPorts = new List<ConnectionPort>();
     }
 
     internal class CollectorLayoutV2
@@ -257,11 +270,13 @@ namespace SwFeatureDebug
     {
         private readonly ManualBusbarRuleSet _rules;
         private readonly BusbarSettings _settings;
+        private readonly BusbarLengthControllerV2 _lengthController;
 
         public CollectorLayoutPlannerV2(ManualBusbarRuleSet rules, BusbarSettings settings)
         {
             _rules = rules;
             _settings = settings;
+            _lengthController = new BusbarLengthControllerV2(settings);
         }
 
         public CollectorLayoutV2 CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs)
@@ -269,24 +284,92 @@ namespace SwFeatureDebug
             double baseY = loubaoInputs.Max(p => p.HoleCenter.Y) + _settings.CollectorTopClearanceY;
             double collectorY = baseY - phaseIndex * _settings.CollectorPhaseSpacing;
             double collectorZ = loubaoInputs.Average(p => p.HoleCenter.Z) + _settings.CollectorOffsetFromLoubaoInZ;
-            double minX = Math.Min(fuseOut.HoleCenter.X, loubaoInputs.Min(p => p.HoleCenter.X));
-            double maxX = Math.Max(fuseOut.HoleCenter.X, loubaoInputs.Max(p => p.HoleCenter.X));
-            double endExtend = _settings.CollectorProfile.Width / 2.0;
+            CollectorLengthRangeV2 lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs));
 
             return new CollectorLayoutV2
             {
                 Phase = phase,
                 Direction = AxisDirection.X,
-                Center = new Point3((minX + maxX) / 2.0, collectorY, collectorZ),
-                StartX = minX - endExtend,
-                EndX = maxX + endExtend
+                Center = new Point3((lengthRange.StartX + lengthRange.EndX) / 2.0, collectorY, collectorZ),
+                StartX = lengthRange.StartX,
+                EndX = lengthRange.EndX
             };
         }
 
         public ConnectionPort CreateTap(ManualPortRuleProvider ports, string phase, string name, double x, CollectorLayoutV2 collector, ContactFace face)
         {
             Point3 tapPoint = new Point3(x, collector.Center.Y, collector.Center.Z);
-            return ports.CreateCollectorTapPort(phase, name, tapPoint, face);
+            ConnectionPort tap = ports.CreateCollectorTapPort(phase, name, tapPoint, face);
+            collector.TapPorts.Add(tap);
+            return tap;
+        }
+
+        private List<CollectorConnectionExtentV2> CreateConnectionExtents(ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs)
+        {
+            List<CollectorConnectionExtentV2> extents = new List<CollectorConnectionExtentV2>();
+
+            if (fuseOut != null)
+            {
+                extents.Add(new CollectorConnectionExtentV2
+                {
+                    Name = fuseOut.Name,
+                    CenterX = fuseOut.HoleCenter.X,
+                    HalfSpanX = _settings.MainFeedProfile.Width / 2.0
+                });
+            }
+
+            if (loubaoInputs != null)
+            {
+                foreach (ConnectionPort loubaoInput in loubaoInputs)
+                {
+                    extents.Add(new CollectorConnectionExtentV2
+                    {
+                        Name = loubaoInput.Name,
+                        CenterX = loubaoInput.HoleCenter.X,
+                        HalfSpanX = _settings.BranchProfile.Width / 2.0
+                    });
+                }
+            }
+
+            return extents;
+        }
+    }
+
+    internal class CollectorLengthRangeV2
+    {
+        public double StartX;
+        public double EndX;
+    }
+
+    internal class CollectorConnectionExtentV2
+    {
+        public string Name;
+        public double CenterX;
+        public double HalfSpanX;
+    }
+
+    internal class BusbarLengthControllerV2
+    {
+        private readonly BusbarSettings _settings;
+
+        public BusbarLengthControllerV2(BusbarSettings settings)
+        {
+            _settings = settings;
+        }
+
+        public CollectorLengthRangeV2 Calculate(List<CollectorConnectionExtentV2> connectionExtents)
+        {
+            if (connectionExtents == null || connectionExtents.Count == 0)
+                throw new Exception("Collector length calculation requires at least one connected busbar extent.");
+
+            double positiveXLimit = connectionExtents.Max(e => e.CenterX + e.HalfSpanX);
+            double negativeXLimit = connectionExtents.Min(e => e.CenterX - e.HalfSpanX);
+
+            return new CollectorLengthRangeV2
+            {
+                StartX = negativeXLimit - _settings.CollectorNegativeXExtend,
+                EndX = positiveXLimit
+            };
         }
     }
 
@@ -414,12 +497,226 @@ namespace SwFeatureDebug
         public List<Point3> CreateSheetMetalSketchLine(BusbarV2 busbar)
         {
             List<Point3> sketchLine = AddEndMargins(busbar);
+            ApplyThicknessTransition(busbar, sketchLine);
             return sketchLine;
         }
 
         public bool IsSameSide(ConnectionPort start, ConnectionPort end)
         {
             return start.RequiredFace == end.RequiredFace;
+        }
+
+        public ContactTopologyKind Resolve(BusbarV2 busbar)
+        {
+            if (busbar == null || busbar.StartPort == null || busbar.EndPort == null)
+                return ContactTopologyKind.SameSide;
+
+            if (busbar.Kind == BusbarKind.MainFeed)
+                return ResolveMainFeedTopology(busbar);
+
+            if (busbar.Kind == BusbarKind.Branch)
+                return ContactTopologyKind.SameSide;
+
+            return ContactTopologyKind.SameSide;
+        }
+
+        private static ContactTopologyKind ResolveMainFeedTopology(BusbarV2 busbar)
+        {
+            bool collectorUpper = busbar.EndPort.RequiredFace == ContactFace.Upper;
+            bool collectorLower = busbar.EndPort.RequiredFace == ContactFace.Lower;
+            bool fuseOnBackSide = busbar.StartPort.RequiredFace == ContactFace.Back;
+            bool fuseOnFrontSide = busbar.StartPort.RequiredFace == ContactFace.Front;
+
+            if (fuseOnBackSide && collectorUpper)
+                return ContactTopologyKind.DifferentSide;
+
+            if (fuseOnBackSide && collectorLower)
+                return ContactTopologyKind.SameSide;
+
+            if (fuseOnFrontSide && collectorUpper)
+                return ContactTopologyKind.SameSide;
+
+            if (fuseOnFrontSide && collectorLower)
+                return ContactTopologyKind.DifferentSide;
+
+            return ContactTopologyKind.SameSide;
+        }
+
+        private static void ApplyThicknessTransition(BusbarV2 busbar, List<Point3> sketchLine)
+        {
+            if (busbar == null || sketchLine == null || sketchLine.Count < 2)
+                return;
+
+            ContactTopologyKind topology = ResolveForTransition(busbar);
+            if (topology == ContactTopologyKind.SameSide)
+                return;
+
+            bool compensateStart = ShouldCompensateStart(busbar);
+            int anchorIndex = compensateStart
+                ? FindPointIndex(sketchLine, busbar.LogicalCenterline[0])
+                : FindPointIndex(sketchLine, busbar.LogicalCenterline[busbar.LogicalCenterline.Count - 1]);
+
+            if (anchorIndex < 0)
+                return;
+
+            Point3 tangent = GetEndpointTangent(sketchLine, anchorIndex, compensateStart);
+            Point3 normal = ChooseThicknessNormal(tangent, compensateStart ? busbar.StartPort.RequiredFace : busbar.EndPort.RequiredFace);
+            Point3 offset = Scale(normal, busbar.Profile.Thickness);
+
+            if (offset.DistanceTo(new Point3(0, 0, 0)) <= Mm(0.001))
+                return;
+
+            MoveEndpointRun(sketchLine, anchorIndex, compensateStart, offset);
+
+            Console.WriteLine(
+                "Thickness topology transition [" + busbar.Name + "]: " +
+                topology + ", compensate=" + (compensateStart ? "Start" : "End") +
+                ", offset dX=" + ToMm(offset.X).ToString("F3") +
+                " mm, dY=" + ToMm(offset.Y).ToString("F3") +
+                " mm, dZ=" + ToMm(offset.Z).ToString("F3") + " mm");
+        }
+
+        private static ContactTopologyKind ResolveForTransition(BusbarV2 busbar)
+        {
+            if (busbar.Kind == BusbarKind.MainFeed)
+                return ResolveMainFeedTopology(busbar);
+
+            if (busbar.Kind == BusbarKind.Branch)
+                return ContactTopologyKind.SameSide;
+
+            return ContactTopologyKind.SameSide;
+        }
+
+        private static bool ShouldCompensateStart(BusbarV2 busbar)
+        {
+            if (busbar.Routing == null)
+                return false;
+
+            if (busbar.Routing.TransitionPolicy == ThicknessTransitionPolicy.PreferStartPort)
+                return true;
+
+            return false;
+        }
+
+        private static Point3 GetEndpointTangent(List<Point3> points, int anchorIndex, bool atStart)
+        {
+            if (atStart)
+            {
+                for (int i = anchorIndex + 1; i < points.Count; i++)
+                {
+                    Point3 tangent = Normalize(Subtract(points[i], points[anchorIndex]));
+                    if (tangent.DistanceTo(new Point3(0, 0, 0)) > Mm(0.001))
+                        return tangent;
+                }
+            }
+            else
+            {
+                for (int i = anchorIndex - 1; i >= 0; i--)
+                {
+                    Point3 tangent = Normalize(Subtract(points[anchorIndex], points[i]));
+                    if (tangent.DistanceTo(new Point3(0, 0, 0)) > Mm(0.001))
+                        return tangent;
+                }
+            }
+
+            return new Point3(0, 0, 0);
+        }
+
+        private static Point3 ChooseThicknessNormal(Point3 tangent, ContactFace face)
+        {
+            if (face == ContactFace.Upper)
+                return new Point3(0, 1, 0);
+
+            if (face == ContactFace.Lower)
+                return new Point3(0, -1, 0);
+
+            if (face == ContactFace.Back)
+                return new Point3(0, 0, 1);
+
+            if (face == ContactFace.Front)
+                return new Point3(0, 0, -1);
+
+            if (face == ContactFace.Left)
+                return new Point3(1, 0, 0);
+
+            if (face == ContactFace.Right)
+                return new Point3(-1, 0, 0);
+
+            return InferPlanarNormal(tangent);
+        }
+
+        private static Point3 InferPlanarNormal(Point3 tangent)
+        {
+            double ax = Math.Abs(tangent.X);
+            double ay = Math.Abs(tangent.Y);
+            double az = Math.Abs(tangent.Z);
+
+            if (az >= ax && az >= ay)
+                return new Point3(0, 1, 0);
+
+            if (ay >= ax && ay >= az)
+                return new Point3(0, 0, 1);
+
+            return new Point3(0, 1, 0);
+        }
+
+        private static void MoveEndpointRun(List<Point3> points, int anchorIndex, bool atStart, Point3 offset)
+        {
+            if (atStart)
+            {
+                Point3 anchor = points[anchorIndex];
+                for (int i = anchorIndex; i >= 0; i--)
+                    points[i] = Add(points[i], offset);
+
+                for (int i = anchorIndex + 1; i < points.Count; i++)
+                {
+                    if (!SharesTwoCoordinates(points[i], anchor))
+                        break;
+
+                    points[i] = Add(points[i], offset);
+                }
+
+                return;
+            }
+
+            Point3 anchorEnd = points[anchorIndex];
+            for (int i = anchorIndex; i < points.Count; i++)
+                points[i] = Add(points[i], offset);
+
+            for (int i = anchorIndex - 1; i >= 0; i--)
+            {
+                if (!SharesTwoCoordinates(points[i], anchorEnd))
+                    break;
+
+                points[i] = Add(points[i], offset);
+            }
+        }
+
+        private static bool SharesTwoCoordinates(Point3 a, Point3 b)
+        {
+            int same = 0;
+            if (Math.Abs(a.X - b.X) <= Mm(0.01))
+                same++;
+            if (Math.Abs(a.Y - b.Y) <= Mm(0.01))
+                same++;
+            if (Math.Abs(a.Z - b.Z) <= Mm(0.01))
+                same++;
+
+            return same >= 2;
+        }
+
+        private static int FindPointIndex(List<Point3> points, Point3 target)
+        {
+            if (points == null)
+                return -1;
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (points[i].DistanceTo(target) <= Mm(0.01))
+                    return i;
+            }
+
+            return -1;
         }
 
         private static List<Point3> AddEndMargins(BusbarV2 busbar)
@@ -479,6 +776,11 @@ namespace SwFeatureDebug
         private static double Mm(double value)
         {
             return value / 1000.0;
+        }
+
+        private static double ToMm(double value)
+        {
+            return value * 1000.0;
         }
     }
 
@@ -621,6 +923,7 @@ namespace SwFeatureDebug
                     .Select((l, i) => portRules.CreateLoubaoInPort(phase, i + 1, FindRequiredPoint(foundPoints, l.ComponentName, phase + "_IN")))
                     .OrderBy(p => p.HoleCenter.X)
                     .ToList();
+                ApplyBranchDevicePortRules(loubaoInputs, rules);
 
                 CollectorLayoutV2 collector = collectorPlanner.CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs);
                 plan.Collectors.Add(collector);
@@ -633,8 +936,9 @@ namespace SwFeatureDebug
                     collector,
                     rules.MainFeedCollectorFace);
                 ApplyMainFeedCollectorTapRules(mainTap, settings, rules);
+                ApplyCollectorTapHoleRules(mainTap, rules);
 
-                plan.Busbars.Add(CreateBusbar(
+                BusbarV2 mainFeed = CreateBusbar(
                     "Busbar_" + phase + "_MainFeed_V2",
                     BusbarKind.MainFeed,
                     settings.MainFeedProfile,
@@ -642,7 +946,8 @@ namespace SwFeatureDebug
                     mainTap,
                     rules,
                     routePlanner,
-                    topology));
+                    topology);
+                plan.Busbars.Add(mainFeed);
 
                 for (int i = 0; i < loubaoInputs.Count; i++)
                 {
@@ -653,8 +958,10 @@ namespace SwFeatureDebug
                         loubaoInputs[i].HoleCenter.X,
                         collector,
                         rules.BranchCollectorFace);
+                    ApplyBranchCollectorTapRules(branchTap, rules);
+                    ApplyCollectorTapHoleRules(branchTap, rules);
 
-                    plan.Busbars.Add(CreateBusbar(
+                    BusbarV2 branch = CreateBusbar(
                         "Busbar_" + phase + "_Branch_" + (i + 1) + "_V2",
                         BusbarKind.Branch,
                         settings.BranchProfile,
@@ -662,17 +969,109 @@ namespace SwFeatureDebug
                         branchTap,
                         rules,
                         routePlanner,
-                        topology));
+                        topology);
+                    plan.Busbars.Add(branch);
                 }
+
+                plan.Busbars.Add(CreateCollectorBusbar(
+                    phase,
+                    collector,
+                    rules,
+                    settings,
+                    topology));
             }
 
             return plan;
+        }
+
+        private static BusbarV2 CreateCollectorBusbar(
+            string phase,
+            CollectorLayoutV2 collector,
+            ManualBusbarRuleSet rules,
+            BusbarSettings settings,
+            ContactTopologyResolver topology)
+        {
+            ConnectionPort start = CreateCollectorEndPort(
+                phase,
+                phase + "_Collector_Start",
+                new Point3(collector.StartX, collector.Center.Y, collector.Center.Z),
+                rules.MainFeedCollectorFace,
+                -1);
+
+            ConnectionPort end = CreateCollectorEndPort(
+                phase,
+                phase + "_Collector_End",
+                new Point3(collector.EndX, collector.Center.Y, collector.Center.Z),
+                rules.MainFeedCollectorFace,
+                1);
+
+            BusbarV2 busbar = new BusbarV2
+            {
+                Name = "Busbar_" + phase + "_Collector_V2",
+                Kind = BusbarKind.Collector,
+                Profile = settings.CollectorProfile,
+                StartPort = start,
+                EndPort = end,
+                Routing = new BusbarRoutingOptions
+                {
+                    AxisOrder = rules.RouteAxisOrder,
+                    TransitionPolicy = rules.TransitionPolicy
+                },
+                SheetMetal = SheetMetalOptions.FromRules(rules)
+            };
+
+            busbar.LogicalCenterline = new List<Point3>
+            {
+                start.HoleCenter,
+                end.HoleCenter
+            };
+            busbar.SheetMetalSketchLine = topology.CreateSheetMetalSketchLine(busbar);
+            busbar.MountingPorts = collector.TapPorts
+                .Where(p => p.HoleDiameterMm > 0.0)
+                .Select(CloneConnectionPort)
+                .ToList();
+            return busbar;
+        }
+
+        private static ConnectionPort CreateCollectorEndPort(string phase, string name, Point3 point, ContactFace face, int leadSign)
+        {
+            return new ConnectionPort
+            {
+                Name = name,
+                ComponentName = "Collector_" + phase,
+                Kind = PortKind.CollectorTap,
+                HoleCenter = point,
+                RequiredFace = face,
+                PreferredLeadAxis = AxisDirection.X,
+                PreferredLeadSign = leadSign,
+                EndMarginMm = 0.0,
+                HoleDiameterMm = 0.0
+            };
         }
 
         private static void ApplyMainFeedCollectorTapRules(ConnectionPort tap, BusbarSettings settings, ManualBusbarRuleSet rules)
         {
             tap.EndMarginMm = settings.CollectorWidthMm * rules.MainFeedCollectorEndMarginRatio;
             tap.HoleDiameterMm = rules.MainFeedCollectorHoleDiameterMm;
+        }
+
+        private static void ApplyBranchDevicePortRules(List<ConnectionPort> ports, ManualBusbarRuleSet rules)
+        {
+            if (ports == null)
+                return;
+
+            foreach (ConnectionPort port in ports)
+                port.HoleDiameterMm = rules.BranchStartHoleDiameterMm;
+        }
+
+        private static void ApplyBranchCollectorTapRules(ConnectionPort tap, ManualBusbarRuleSet rules)
+        {
+            tap.HoleDiameterMm = rules.BranchCollectorHoleDiameterMm;
+        }
+
+        private static void ApplyCollectorTapHoleRules(ConnectionPort tap, ManualBusbarRuleSet rules)
+        {
+            tap.HoleDiameterMm = rules.CollectorTapHoleDiameterMm;
         }
 
         private static BusbarV2 CreateBusbar(
@@ -702,7 +1101,33 @@ namespace SwFeatureDebug
 
             busbar.LogicalCenterline = routePlanner.CreateRoute(kind, profile, start, end, rules.RouteAxisOrder);
             busbar.SheetMetalSketchLine = topology.CreateSheetMetalSketchLine(busbar);
+            AddMountingPortIfNeeded(busbar, start);
+            AddMountingPortIfNeeded(busbar, end);
             return busbar;
+        }
+
+        private static void AddMountingPortIfNeeded(BusbarV2 busbar, ConnectionPort port)
+        {
+            if (busbar == null || port == null || port.HoleDiameterMm <= 0.0)
+                return;
+
+            busbar.MountingPorts.Add(CloneConnectionPort(port));
+        }
+
+        private static ConnectionPort CloneConnectionPort(ConnectionPort port)
+        {
+            return new ConnectionPort
+            {
+                Name = port.Name,
+                ComponentName = port.ComponentName,
+                Kind = port.Kind,
+                HoleCenter = port.HoleCenter,
+                RequiredFace = port.RequiredFace,
+                PreferredLeadAxis = port.PreferredLeadAxis,
+                PreferredLeadSign = port.PreferredLeadSign,
+                EndMarginMm = port.EndMarginMm,
+                HoleDiameterMm = port.HoleDiameterMm
+            };
         }
 
         private static BusbarSettings CreateDemoSettings()
@@ -718,6 +1143,7 @@ namespace SwFeatureDebug
                 CollectorPhaseSpacingMm = 60.0,
                 CollectorTopClearanceYMm = 180.0,
                 CollectorOffsetFromLoubaoInZMm = 120.0,
+                CollectorNegativeXExtendMm = 50.0,
                 MainCollectorFrontClearanceMm = 0.0,
                 MainCollectorLapDepthRatio = 0.5
             };
@@ -747,8 +1173,14 @@ namespace SwFeatureDebug
             Console.WriteLine("Route " + busbar.Name + " [" + busbar.Kind + "] " + busbar.Profile.Label + "mm");
             Console.WriteLine("  Start: " + busbar.StartPort);
             Console.WriteLine("  End:   " + busbar.EndPort);
-            Console.WriteLine("  Face topology: " + (topology.IsSameSide(busbar.StartPort, busbar.EndPort) ? "SameSide" : "DifferentSide"));
+            Console.WriteLine("  Face topology: " + topology.Resolve(busbar));
             Console.WriteLine("  SheetMetal: width=" + busbar.SheetMetal.WidthMode + ", R=" + busbar.SheetMetal.BendRadiusMm.ToString("0.###") + "mm, K=" + busbar.SheetMetal.KFactor.ToString("0.###"));
+            Console.WriteLine("  Mounting holes: " + (busbar.MountingPorts == null ? 0 : busbar.MountingPorts.Count));
+            if (busbar.MountingPorts != null)
+            {
+                for (int i = 0; i < busbar.MountingPorts.Count; i++)
+                    Console.WriteLine("    H" + (i + 1) + " " + busbar.MountingPorts[i].Name + ", dia=" + busbar.MountingPorts[i].HoleDiameterMm.ToString("0.###") + "mm, " + busbar.MountingPorts[i].HoleCenter.ToMillimeterText());
+            }
 
             Console.WriteLine("  Hole-center route:");
             for (int i = 0; i < busbar.LogicalCenterline.Count; i++)

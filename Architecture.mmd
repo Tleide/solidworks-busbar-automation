@@ -1,0 +1,94 @@
+﻿flowchart TD
+    subgraph L0["Application Layer"]
+        A0["Program.Main"]
+        A1["ConfigureFromArgs"]
+        A2["Generation Mode<br/>preview / first-main / all"]
+    end
+
+    subgraph L1["SolidWorks Session Layer"]
+        S0["GetOrStartSolidWorks"]
+        S1["GetActiveOrOpenAssembly"]
+        S2["ActivateDocument / CloseDoc"]
+    end
+
+    subgraph L2["Assembly Scan Layer"]
+        SC0["ScanReferencePoints"]
+        SC1["DumpModelFeatures"]
+        SC2["TryReadReferencePoint"]
+        SC3["TransformPoint<br/>component -> assembly coordinates"]
+        FP["FoundPoint List"]
+    end
+
+    subgraph L3["Rules And Port Layer"]
+        R0["ManualBusbarRuleSet"]
+        R1["ManualPortRuleProvider"]
+        P0["ConnectionPort<br/>HoleCenter + Face + Lead + Margin + Hole"]
+    end
+
+    subgraph L4["Planning Layer"]
+        BP["BusbarPlanBuilder V2<br/>(current: BusbarPlanningDemoV2)"]
+        CL["CollectorLayoutPlannerV2"]
+        LC["BusbarLengthControllerV2"]
+        TP["Collector Tap Ports"]
+        RP["BusbarRoutePlannerV2"]
+        B0["BusbarV2<br/>LogicalCenterline"]
+    end
+
+    subgraph L5["Topology And Compensation Layer"]
+        T0["ContactTopologyResolver<br/>SameSide / DifferentSide"]
+        C0["End Margin Resolver<br/>(currently inside resolver)"]
+        C1["Thickness Transition Resolver<br/>(currently inside resolver)"]
+        SM["SheetMetalSketchLine"]
+    end
+
+    subgraph L6["Geometry And Sheet Metal Layer"]
+        G0["SketchPlaneResolver<br/>GetOpenProfilePlane"]
+        G1["OpenProfileSketchBuilder<br/>CreateV2SheetMetalOpenProfileSketch"]
+        G2["SheetMetalBaseFlangeBuilder<br/>InsertSheetMetalBaseFlange2"]
+        G3["SheetMetal Parameters<br/>R=5mm, K=0.47, MidPlane"]
+    end
+
+    subgraph L7["Hole Builder Layer"]
+        H0["MountingPorts"]
+        H1["HoleSketchPlaneResolver"]
+        H2["Create Circle At HoleCenter"]
+        H3["FeatureCut4<br/>active sketch preferred"]
+    end
+
+    subgraph L8["Persistence And Assembly Layer"]
+        F0["SaveBusbarV2SheetMetalPart"]
+        F1["InsertPartIntoAssembly<br/>(current: InsertDemoPartIntoAssembly)"]
+        F2["Generated Busbar Components"]
+    end
+
+    A0 --> A1 --> A2
+    A2 --> S0 --> S1
+    S1 --> SC0
+    SC0 --> SC1 --> SC2 --> SC3 --> FP
+
+    FP --> BP
+    R0 --> R1
+    R1 --> P0
+    P0 --> BP
+    BP --> CL
+    CL --> LC
+    LC --> CL
+    CL --> TP
+    TP --> BP
+    BP --> RP
+    RP --> B0
+
+    B0 --> T0
+    T0 --> C0
+    C0 --> C1
+    C1 --> SM
+
+    SM --> G0 --> G1 --> G2 --> G3
+    G3 --> H0 --> H1 --> H2 --> H3
+    H3 --> F0 --> F1 --> F2
+
+    R0 -."topology kind, faces, holes, margins".-> BP
+    R0 -."sheet metal options".-> G3
+    S2 -."document activation".-> G1
+    S2 -."document activation".-> H3
+    S2 -."document activation".-> F0

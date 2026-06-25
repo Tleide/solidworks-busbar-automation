@@ -134,6 +134,7 @@ V0 规则：
 - 汇流排方向为 `X`。
 - 汇流排位置可以先手动指定。
 - 汇流排长度覆盖所有连接点，并在末端继续外伸。
+- 当前长度控制由 `BusbarLengthController` 根据实际连接 Tap 动态计算：每个连接点先按对应铜排宽度的一半转换为 X 向占用范围；`X+` 侧截止到最外侧连接铜排的外边界，不额外外伸；`X-` 侧从最外侧连接铜排的外边界继续外伸 `50mm`，该值应保留为配置参数。
 - 汇流排允许搭接面为 `Upper` 和 `Lower`。
 
 ## 5. 手动规则 V0
@@ -234,13 +235,67 @@ P4 = 汇流排 Tap 孔中心
 
 Mid Plane 只解决铜排宽度方向对称，厚度方向仍需要拓扑判断。
 
-### 7.1 判断目标
-
-拓扑解析器需要判断：
+本项目中，同侧/异侧是底层工程拓扑关系；补偿只是当前钣金建模阶段对该拓扑关系的一种处理结果。文档和代码都应保持以下分层：
 
 ```text
-StartPort.RequiredFace 和 EndPort.RequiredFace 是同侧还是异侧
+工程场景
+-> 同侧/异侧拓扑判定
+-> 补偿策略
+-> 最终钣金建模
 ```
+
+不要把逻辑写成：
+
+```text
+工程场景
+-> 直接补偿
+-> 最终钣金建模
+```
+
+这样后续如果出现新的铜排搭接方式，或者同侧/异侧从手动规则升级为自动几何判断时，只需要替换拓扑判定接口，不需要推翻路线规划和建模层。
+
+### 7.1 拓扑关系定义
+
+同侧/异侧描述的是铜排两端连接关系在厚度方向上的拓扑位置，而不是简单比较两个端口的 `RequiredFace` 名称。
+
+V0 阶段先使用工程场景规则表进行手动判定；后续可升级为根据设备包络、连接面法向、汇流排搭接面、端点路径切向和钣金厚度方向自动判断。
+
+建议接口：
+
+```csharp
+enum ContactTopologyKind
+{
+    SameSide,
+    DifferentSide
+}
+
+interface IContactTopologyRule
+{
+    ContactTopologyKind Resolve(BusbarV2 busbar, CabinetTopologyKind cabinetTopology);
+}
+```
+
+### 7.2 当前工程场景规则表
+
+当前先按典型工程场景定义转接排与汇流排的同侧/异侧关系。
+
+| 工程场景 | 汇流排搭接面 | 拓扑关系 | 当前建模处理 |
+| --- | --- | --- | --- |
+| 刀熔与漏保分别位于汇流排两侧 | `Upper` | 异侧 | 需要补偿 |
+| 刀熔与漏保分别位于汇流排两侧 | `Lower` | 同侧 | 不需要补偿 |
+| 刀熔与漏保位于汇流排同侧 | `Upper` | 同侧 | 不需要补偿 |
+| 刀熔与漏保位于汇流排同侧 | `Lower` | 异侧 | 需要补偿 |
+
+说明：
+
+- `TypicalDesign` 对应“刀熔与漏保分别位于汇流排两侧”。
+- `SouthernGrid` 对应“刀熔与漏保位于汇流排同侧”。
+- 上表先用于转接排 `MainFeed -> Collector`。
+- 分支排的拓扑关系也应通过同一个接口判断，不能因为当前生成效果正确就跳过判定。
+
+### 7.3 拓扑关系到补偿策略
+
+拓扑判定完成后，再决定是否补偿。
 
 如果同侧：
 
@@ -254,10 +309,16 @@ LogicalCenterline == SheetMetalSketchLine
 ```text
 需要把其中一个端口从接触面孔中心转换到钣金草图参考面
 转换距离 = 当前铜排 Thickness
-转换方向 = 该端附近路径线段在草图平面内的法向方向
+转换方向 = 被补偿端附近路径线段在当前 2D 草图平面内的法向方向
 ```
 
-### 7.2 补偿方向的统一解释
+当前 V0 策略：
+
+- 异侧时默认优先补偿汇流排端。
+- 补偿量为当前铜排厚度 `Thickness`。
+- 补偿方向不能写死为某个全局轴，应由被补偿端附近路径段推导。
+
+### 7.4 补偿方向的统一解释
 
 不要写死“刀熔端补 Z、汇流排端补 Y”。更通用的规则是：
 
@@ -272,7 +333,7 @@ LogicalCenterline == SheetMetalSketchLine
 
 这样路径规则变化后，厚度方向也能自动跟随。
 
-### 7.3 异侧时优先补偿端
+### 7.5 异侧时优先补偿端
 
 V0 使用手动策略。
 
@@ -333,6 +394,9 @@ ManualPortRuleProvider
 CollectorLayoutPlanner
     手动或自动布置汇流排
 
+BusbarLengthController
+    根据所有与汇流排连接的铜排 Tap 位置计算汇流排 X 向起止点
+
 BusbarConnectionPlanner
     建立设备端口到汇流排 TapPort 的连接关系
 
@@ -340,7 +404,10 @@ BusbarRoutePlanner
     生成 LogicalCenterline
 
 ContactTopologyResolver
-    判断同侧/异侧，生成 SheetMetalSketchLine
+    只负责判断同侧/异侧拓扑关系，不直接修改路径点
+
+ThicknessTransitionResolver
+    根据同侧/异侧拓扑关系和 ThicknessTransitionPolicy 生成 SheetMetalSketchLine
 
 SheetMetalBuilder
     用 SolidWorks API 生成钣金实体
@@ -457,7 +524,8 @@ TopToDown.exe --sheetmetal-v2-first-main
 
 - 汇流排 A/B/C 三相手动中心位置如何配置。
 - 汇流排末端外伸方向和外伸长度的默认值。
-- 异侧时 V0 默认补偿起点还是终点。
+- 同侧/异侧 V0 规则表是否覆盖分支排、N 排和后续南网形结构。
+- 异侧时 V0 默认补偿起点还是终点，当前建议优先补偿汇流排端。
 - 连接孔规格、孔径和孔类型。
 - 南网形结构下分支排和转接排的默认引出方向是否仍按 `Y` 优先。
 

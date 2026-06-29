@@ -1,13 +1,14 @@
 ﻿# 业务流程分析
 
-本文档不从代码细节出发，而从配电箱铜排自动建模业务流程出发，说明当前程序如何从装配体里的命名参考点，生成三相转接排、汇流排、分支排，并插回 SolidWorks 装配体。
+本文档不从代码细节出发，而从配电箱铜排自动建模业务流程出发，说明当前程序如何从装配体里的命名参考点，生成 ABC 三相转接排、ABC/N 汇流排、ABC/N 分支排，并插回 SolidWorks 装配体。
 
 当前主业务目标：
 
 ```text
 读取装配体
 -> 找到刀熔 OUT 和漏保 IN 点
--> 生成汇流排位置和长度
+-> 生成 ABC 汇流排位置和长度
+-> 如果存在完整 N_IN，则追加 N 汇流排和 N 分支排
 -> 建立每根铜排的起终端口
 -> 判断同侧/异侧拓扑
 -> 生成带端部裕度和补偿的钣金中心线
@@ -64,6 +65,7 @@
 | 汇流排位置阶段 | 计算每相汇流排中心 Y/Z 和方向。 | 漏保 IN 点、相序、设置参数。 | `CollectorLayoutV2.Center`。 | `CollectorLayoutPlannerV2.CreateLayout` |
 | 汇流排长度阶段 | 根据所有搭接铜排决定 X 起止范围。 | 刀熔端口、漏保端口、对应铜排宽度。 | `StartX`、`EndX`。 | `BusbarLengthControllerV2.Calculate` |
 | 汇流排 Tap 阶段 | 在汇流排上创建转接排/分支排连接点。 | 设备端口 X、汇流排中心、搭接面。 | `CollectorTap` 端口。 | `CollectorLayoutPlannerV2.CreateTap` |
+| N 相扩展阶段 | 在 ABC 主流程后追加 N 汇流排和 N 分支排。 | 每个漏保的 `N_IN`、N 排规格、汇流排布局参数。 | N `CollectorLayoutV2`、N 分支排 `BusbarV2`。 | `AddNeutralCollectorAndBranches`、`CreateNeutralLoubaoInputs` |
 | 连接关系阶段 | 建立每根铜排的起点和终点。 | 设备端口、Tap 端口。 | `BusbarV2.StartPort`、`EndPort`。 | `BusbarPlanningDemoV2.CreateBusbar`、`CreateCollectorBusbar` |
 | 拓扑判断阶段 | 判断连接两端属于同侧还是异侧。 | 铜排类型、起终端口连接面、工程场景。 | `ContactTopologyKind`。 | `ContactTopologyResolver.Resolve` |
 | 路径规划阶段 | 生成孔中心意义上的业务路径。 | 起点端口、终点端口、路径规则。 | `LogicalCenterline`。 | `BusbarRoutePlannerV2.CreateRoute` |
@@ -90,10 +92,12 @@ flowchart TD
     H --> I["汇流排长度控制<br/>扫描全部搭接铜排 X 向范围"]
     I --> J["汇流排 Tap 生成<br/>MainFeed Tap + Branch Tap"]
 
+    J --> K0["N 相扩展阶段<br/>完整 N_IN -> N Collector + N Branch"]
     J --> K1["转接排生成阶段<br/>刀熔 OUT -> 汇流排 Tap"]
     J --> K2["分支排生成阶段<br/>漏保 IN -> 汇流排 Tap"]
     J --> K3["汇流排自身生成阶段<br/>StartX -> EndX"]
 
+    K0 --> L2
     K1 --> L1["路径生成阶段<br/>先 Y- 再 Z- 再 Y+ 再 Z-"]
     K2 --> L2["路径生成阶段<br/>两轴折线, 默认先 Y 后 Z"]
     K3 --> L3["路径生成阶段<br/>沿 X 方向直线"]
@@ -158,7 +162,8 @@ StartPort + EndPort + Profile + RoutingOptions + SheetMetalOptions
 
 - `CollectorLayoutV2`：每相一个。
 - 每个 Collector 包含：`Center`、`StartX`、`EndX`、`TapPorts`。
-- 三根汇流排 `BusbarV2`。
+- ABC 主流程输出三根汇流排 `BusbarV2`。
+- 如果存在完整 `N_IN`，N 相扩展额外输出一根 N 汇流排。
 
 ### 当前规则
 
@@ -189,6 +194,56 @@ EndX = positiveXLimit
 - `CollectorLayoutPlannerV2.CreateConnectionExtents`
 - `BusbarLengthControllerV2.Calculate`
 - `CollectorLayoutPlannerV2.CreateTap`
+- `BusbarPlanningDemoV2.CreateCollectorBusbar`
+
+## 5.1 N 相汇流排和分支排生成流程
+
+### 输入
+
+- 每个漏保组件的 `N_IN` 参考点。
+- N 汇流排规格，当前默认 `6x60mm`。
+- N 分支排规格，当前默认 `4x40mm`。
+- 既有汇流排布局参数：`CollectorTopClearanceYMm`、`CollectorPhaseSpacingMm`、`CollectorOffsetFromLoubaoInZMm`。
+
+### 输出
+
+- 一根 `Busbar_N_Collector_V2`。
+- 每个漏保对应一根 `Busbar_N_Branch_*_V2`。
+
+### 当前规则
+
+```text
+ABC 主流程完成
+-> 扫描每个漏保是否都有 N_IN
+-> 无 N_IN：跳过 N 排
+-> 部分 N_IN：报错
+-> 完整 N_IN：生成 N Collector 和 N Branch
+```
+
+N 不加入 `PhaseNames`，原因是当前刀熔只处理 ABC 三相，N 不是转接排主流程的一部分。这样做可以避免把 N 错误地纳入刀熔 OUT 逻辑。
+
+N 汇流排沿用现有汇流排布局：
+
+```text
+N collectorY = max(N_IN Y) + CollectorTopClearanceY - 3 * CollectorPhaseSpacing
+N collectorZ = average(N_IN Z) + CollectorOffsetFromLoubaoInZ
+```
+
+当前已通过实体生成验证：
+
+```text
+--sheetmetal-v2-all
+Target count = 19
+3 MainFeed + 4 Collector + 12 Branch
+```
+
+### 负责函数
+
+- `AddNeutralCollectorAndBranches`
+- `CreateNeutralLoubaoInputs`
+- `CollectorLayoutPlannerV2.CreateLayout`
+- `CollectorLayoutPlannerV2.CreateTap`
+- `BusbarPlanningDemoV2.CreateBusbar`
 - `BusbarPlanningDemoV2.CreateCollectorBusbar`
 
 ## 6. 转接排生成流程
@@ -281,7 +336,7 @@ P2 = (P0.X, Tap.Y, Tap.Z)
 
 ### 拓扑与补偿
 
-当前分支排按 `SameSide` 处理，因此不会执行异侧厚度补偿。它能正确生成不能证明补偿逻辑一定正确，只能说明当前分支排场景不需要异侧补偿。
+当前 ABC 分支排和 N 分支排均按 `SameSide` 处理，因此不会执行异侧厚度补偿。它能正确生成不能证明补偿逻辑一定正确，只能说明当前分支排场景不需要异侧补偿。
 
 ### 负责函数
 
@@ -303,7 +358,7 @@ P2 = (P0.X, Tap.Y, Tap.Z)
 
 ### 输出
 
-- 三根汇流排 `Busbar_A_Collector_V2`、`Busbar_B_Collector_V2`、`Busbar_C_Collector_V2`。
+- 四根汇流排 `Busbar_A_Collector_V2`、`Busbar_B_Collector_V2`、`Busbar_C_Collector_V2`、`Busbar_N_Collector_V2`，其中 N 汇流排仅在完整 `N_IN` 存在时生成。
 - 汇流排上包含所有 Tap 孔。
 
 ### 当前路径规则

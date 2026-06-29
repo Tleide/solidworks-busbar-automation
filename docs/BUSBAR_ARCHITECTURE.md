@@ -43,6 +43,8 @@
 | 转接排汇流排端预留 `MainFeedCollectorEndMarginRatio` | `CollectorWidth * 0.5` |
 | 转接排刀熔端孔径 `MainFeedStartHoleDiameterMm` | `13` |
 | 转接排汇流排端孔径 `MainFeedCollectorHoleDiameterMm` | `13` |
+| N 汇流排规格 `NeutralCollectorWidthMm x NeutralCollectorThicknessMm` | `60 x 6` |
+| N 分支排规格 `NeutralBranchWidthMm x NeutralBranchThicknessMm` | `40 x 4` |
 
 说明：
 
@@ -50,6 +52,7 @@
 - 端部预留从孔中心继续向铜排端部外伸。
 - 宽度方向由钣金两侧对称保证，不再通过路径点偏移修正。
 - 厚度方向由端口面、搭接面和钣金正反方向规则决定。
+- N 排规格当前作为独立配置项放在 `Program.cs` 顶部 `Settings` 区，不并入 ABC 主排规格，后续可替换为标准校核或自动选型函数。
 
 SolidWorks API 注意事项：
 
@@ -509,6 +512,59 @@ TopToDown.exe --sheetmetal-v2-first-main
 - `--preview-v2-assembly` 只生成 V2 路线预览草图，不生成实体。
 - `--sheetmetal-v2-first-main` 只生成第一根 V2 转接排钣金，用于验证钣金、Mid Plane、孔和装配流程。
 
+### 10.5 N 相汇流排和分支排
+
+记录时间：2026-06-27。
+
+本阶段已经确认 N 相汇流排与 N 相分支排的空间规划和实体生成均可用。
+
+已验证结果：
+
+- `--sheetmetal-v2-all` 成功生成并装配 `19` 根 V2 钣金铜排。
+- 生成内容包括 `3` 根转接排、`4` 根汇流排和 `12` 根分支排。
+- `4` 根汇流排为 `A/B/C/N`，其中 N 汇流排单独使用 `NeutralCollectorProfile`。
+- `12` 根分支排为 `A/B/C/N` 各 `3` 根，其中 N 分支排单独使用 `NeutralBranchProfile`。
+- N 汇流排和 N 分支排均正常生成孔，孔位跟随前面草图骨架计算出的端口位置。
+
+当前 N 相建模策略：
+
+- 不把 `N` 加入 `PhaseNames = { A, B, C }`。
+- `A/B/C` 仍表示刀熔三相进出线主流程。
+- `N` 作为中性线扩展，在 ABC 规划完成后由独立入口追加。
+- 暂时只生成 `N Collector` 和 `N Branch`，不生成 N 相转接排或进线排。
+
+N 点位规则：
+
+- 每个漏保必须提供 `N_IN` 参考点，程序才生成 N 排。
+- 如果没有任何 `N_IN`，则跳过 N 排生成。
+- 如果只存在部分 `N_IN`，则抛出明确错误，避免生成不完整的 N 排。
+
+N 排位置规则：
+
+- N 汇流排沿用既有汇流排布局逻辑，不新增独立高度函数。
+- 当前配置中 `CollectorTopClearanceYMm = 240`，`CollectorPhaseSpacingMm = 60`。
+- A 汇流排高度由漏保 IN 点上方间隙确定，B/C/N 依次按相间距向下排列。
+- 这种做法保持了代码简洁，也让 N 排自然纳入现有汇流排层距体系。
+
+N 排规格配置：
+
+```text
+NeutralCollectorWidthMm = 60
+NeutralCollectorThicknessMm = 6
+NeutralBranchWidthMm = 40
+NeutralBranchThicknessMm = 4
+```
+
+当前这些参数只是工程默认值，后续如果需要严格符合 N 排截面标准，应在规格选择层增加校核：
+
+```text
+主排截面
+-> N 排标准规则
+-> NeutralCollectorProfile / NeutralBranchProfile
+```
+
+目前暂不硬编码标准结论，避免在没有标准依据时把经验值写死。
+
 ## 11. 迁移步骤
 
 1. 先保留旧代码，不继续在旧逻辑上补偏移。
@@ -524,8 +580,10 @@ TopToDown.exe --sheetmetal-v2-first-main
 
 - 汇流排 A/B/C 三相手动中心位置如何配置。
 - 汇流排末端外伸方向和外伸长度的默认值。
-- 同侧/异侧 V0 规则表是否覆盖分支排、N 排和后续南网形结构。
+- 同侧/异侧 V0 规则表是否覆盖后续南网形结构；当前 N 分支排按同侧分支排逻辑处理，已通过当前典设箱验证。
 - 异侧时 V0 默认补偿起点还是终点，当前建议优先补偿汇流排端。
 - 连接孔规格、孔径和孔类型。
+- N 排截面规格的标准依据，以及是否需要根据主排截面自动校核。
+- N 相进线排或变压器中性线接入点的建模规则。
 - 南网形结构下分支排和转接排的默认引出方向是否仍按 `Y` 优先。
 

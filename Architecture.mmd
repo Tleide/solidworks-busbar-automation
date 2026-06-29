@@ -29,6 +29,7 @@
         BP["BusbarPlanBuilder V2<br/>(current: BusbarPlanningDemoV2)"]
         CL["CollectorLayoutPlannerV2"]
         LC["BusbarLengthControllerV2"]
+        N0["Neutral Extension<br/>N Collector + N Branch"]
         TP["Collector Tap Ports"]
         RP["BusbarRoutePlannerV2"]
         B0["BusbarV2<br/>LogicalCenterline"]
@@ -71,9 +72,12 @@
     R1 --> P0
     P0 --> BP
     BP --> CL
+    BP --> N0
     CL --> LC
     LC --> CL
     CL --> TP
+    N0 --> CL
+    N0 --> TP
     TP --> BP
     BP --> RP
     RP --> B0

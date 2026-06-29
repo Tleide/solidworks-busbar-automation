@@ -6,6 +6,7 @@
 
 - 当前主工程是 `TopToDown`，负责连接 SolidWorks、扫描装配体、规划铜排、生成钣金零件并插回装配体。
 - 当前已经形成了 V2 业务抽象，核心在 `BusbarFramework.cs`；但 SolidWorks API 操作仍集中在 `Program.cs`。
+- 当前 V2 主线已经从 ABC 三相扩展到 ABC + N：ABC 负责三相转接排、汇流排和分支排，N 当前负责中性线汇流排和分支排。
 - 代码同时保留了旧 V1 路线和新 V2 路线。后续应以 V2 为主线，把 V1/临时 Demo 逐步归档或删除。
 
 ## 1. 文件结构树
@@ -192,7 +193,7 @@ Persistence / Assembly Insert Layer
 | 类/枚举 | 所属文件 | 类型 | 职责 | 主要依赖 |
 | --- | --- | --- | --- | --- |
 | `Program` | `Program.cs` | 应用/SW API | 主入口、SW 调用、生成流程编排。 | SolidWorks Interop、V2 框架模型。 |
-| `BusbarSettings` | `Program.cs` | 配置模型 | 铜排宽厚、汇流排间距、钣金参数、搭接参数。 | `BusbarProfile`、枚举。 |
+| `BusbarSettings` | `Program.cs` | 配置模型 | 铜排宽厚、N 排独立规格、汇流排间距、钣金参数、搭接参数。 | `BusbarProfile`、枚举。 |
 | `FoundPoint` | `Program.cs` | 数据模型 | 保存扫描到的参考点，坐标统一为装配体坐标。 | `Point3`。 |
 | `Point3` | `Program.cs` | 几何模型 | 三维坐标，内部单位为米，显示转换为毫米。 | 无。 |
 | `BusbarProfile` | `Program.cs` | 数据模型 | 铜排宽度、厚度、标签和单位转换。 | 无。 |
@@ -207,7 +208,7 @@ Persistence / Assembly Insert Layer
 | `CollectorLayoutV2` | `BusbarFramework.cs` | 业务模型 | 单相汇流排位置、起止 X、Tap 端口集合。 | `ConnectionPort`。 |
 | `BusbarPlanV2` | `BusbarFramework.cs` | 规划结果模型 | 一次装配体规划的总输出：规则、设备组、汇流排、铜排列表。 | `BusbarV2`、`CollectorLayoutV2`。 |
 | `ManualPortRuleProvider` | `BusbarFramework.cs` | 规则/转换器 | 把扫描点转换为设备端口或汇流排 Tap 端口。 | `ManualBusbarRuleSet`。 |
-| `CollectorLayoutPlannerV2` | `BusbarFramework.cs` | 业务规划器 | 计算三相汇流排位置、长度范围和 Tap 点。 | `BusbarLengthControllerV2`、`BusbarSettings`。 |
+| `CollectorLayoutPlannerV2` | `BusbarFramework.cs` | 业务规划器 | 计算 ABC/N 汇流排位置、长度范围和 Tap 点。 | `BusbarLengthControllerV2`、`BusbarSettings`。 |
 | `BusbarLengthControllerV2` | `BusbarFramework.cs` | 业务规划器 | 根据所有连接铜排的 X 向占用范围计算汇流排起止点。 | `CollectorConnectionExtentV2`、`BusbarSettings`。 |
 | `BusbarRoutePlannerV2` | `BusbarFramework.cs` | 路径规划器 | 生成转接排和普通两轴折线路径。 | `BusbarSettings`。 |
 | `ContactTopologyResolver` | `BusbarFramework.cs` | 拓扑/补偿器 | 判断同侧/异侧，增加端部裕度，生成钣金草图线。 | `BusbarV2`、`ConnectionPort`。 |
@@ -232,6 +233,8 @@ classDiagram
         +MainFeedWidthMm
         +CollectorWidthMm
         +BranchWidthMm
+        +NeutralCollectorWidthMm
+        +NeutralBranchWidthMm
         +SheetMetalBendRadiusMm
         +SheetMetalKFactor
         +GetProfile(kind)
@@ -452,3 +455,6 @@ classDiagram
 - 孔切除优先采用“进入草图、画圆、保持活动草图立即 FeatureCut4”的流程。
 - 同侧/异侧是底层拓扑概念，补偿只是它的一个建模结果。
 - 汇流排长度应由所有连接铜排的 X 向占用范围决定，不能写死固定长度。
+- N 不并入 `PhaseNames`，而是在 ABC 主流程后追加 `N Collector` 和 `N Branch`，避免误触发刀熔三相 OUT 逻辑。
+- N 排规格应独立配置，当前 `N Collector = 6x60mm`、`N Branch = 4x40mm`；后续可增加标准校核或自动选型。
+- 当前 `--sheetmetal-v2-all` 已验证生成 `19` 根铜排：`3 MainFeed + 4 Collector + 12 Branch`。

@@ -22,11 +22,16 @@ namespace SwFeatureDebug
             BranchWidthMm = 40.0,
             BranchThicknessMm = 4.0,
 
+            NeutralCollectorWidthMm = 60.0,
+            NeutralCollectorThicknessMm = 6.0,
+            NeutralBranchWidthMm = 40.0,
+            NeutralBranchThicknessMm = 4.0,
+
             StartTerminalOffsetZSign = 1,
             EndTerminalOffsetZSign = -1,
 
             CollectorPhaseSpacingMm = 60.0,
-            CollectorTopClearanceYMm = 180.0,
+            CollectorTopClearanceYMm = 240.0,
             CollectorOffsetFromLoubaoInZMm = 120.0,
             CollectorNegativeXExtendMm = 50.0,
 
@@ -48,6 +53,7 @@ namespace SwFeatureDebug
         };
 
         private static readonly string[] PhaseNames = { "A", "B", "C" };
+        private const string NeutralConductorName = "N";
         private static readonly string[] FuseComponentNameHints = { "fuse", "HR6", "rong", "knife", "isolator" };
         private static readonly string[] LoubaoComponentNameHints = { "loubao", "PGM", "leakage", "breaker" };
 
@@ -1809,12 +1815,16 @@ namespace SwFeatureDebug
             foreach (string phase in PhaseNames)
                 selected.Add(FindRequiredV2Busbar(plan, phase, BusbarKind.Collector));
 
+            selected.AddRange(FindOptionalV2Busbars(plan, NeutralConductorName, BusbarKind.Collector));
+
             foreach (string phase in PhaseNames)
                 selected.AddRange(FindV2Busbars(plan, phase, BusbarKind.Branch));
 
+            selected.AddRange(FindOptionalV2Busbars(plan, NeutralConductorName, BusbarKind.Branch));
+
             Console.WriteLine();
             Console.WriteLine("===== V2 sheet metal batch selection =====");
-            Console.WriteLine("Target count: 3 MainFeed + 3 Collector + 9 Branch = " + selected.Count);
+            Console.WriteLine("Target count: " + selected.Count);
             foreach (BusbarV2 busbar in selected)
                 Console.WriteLine("  " + busbar.Name + " [" + busbar.Kind + "] " + busbar.Profile.Label + "mm");
 
@@ -1849,6 +1859,16 @@ namespace SwFeatureDebug
                 throw new Exception("No V2 " + kind + " busbars were planned for phase " + phase + ".");
 
             return busbars;
+        }
+
+        private static List<BusbarV2> FindOptionalV2Busbars(BusbarPlanV2 plan, string phase, BusbarKind kind)
+        {
+            string phasePrefix = "Busbar_" + phase + "_";
+
+            return plan.Busbars
+                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private static void CreateBusbarV2SheetMetalParts(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, List<BusbarV2> busbars)
@@ -2444,6 +2464,10 @@ namespace SwFeatureDebug
         public double CollectorThicknessMm;
         public double BranchWidthMm;
         public double BranchThicknessMm;
+        public double NeutralCollectorWidthMm;
+        public double NeutralCollectorThicknessMm;
+        public double NeutralBranchWidthMm;
+        public double NeutralBranchThicknessMm;
 
         public int StartTerminalOffsetZSign;
         public int EndTerminalOffsetZSign;
@@ -2470,6 +2494,8 @@ namespace SwFeatureDebug
         public BusbarProfile MainFeedProfile { get { return new BusbarProfile(MainFeedWidthMm, MainFeedThicknessMm); } }
         public BusbarProfile CollectorProfile { get { return new BusbarProfile(CollectorWidthMm, CollectorThicknessMm); } }
         public BusbarProfile BranchProfile { get { return new BusbarProfile(BranchWidthMm, BranchThicknessMm); } }
+        public BusbarProfile NeutralCollectorProfile { get { return new BusbarProfile(NeutralCollectorWidthMm, NeutralCollectorThicknessMm); } }
+        public BusbarProfile NeutralBranchProfile { get { return new BusbarProfile(NeutralBranchWidthMm, NeutralBranchThicknessMm); } }
 
         public double CollectorPhaseSpacing { get { return Mm(CollectorPhaseSpacingMm); } }
         public double CollectorTopClearanceY { get { return Mm(CollectorTopClearanceYMm); } }

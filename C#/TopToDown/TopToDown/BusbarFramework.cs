@@ -69,6 +69,8 @@ namespace SwFeatureDebug
         public double BranchStartHoleDiameterMm;
         public double BranchCollectorHoleDiameterMm;
         public double CollectorTapHoleDiameterMm;
+        public double NeutralBranchStartHoleDiameterMm;
+        public double NeutralCollectorTapHoleDiameterMm;
 
         public static ManualBusbarRuleSet CreateDefault(CabinetTopologyKind topologyKind)
         {
@@ -89,7 +91,9 @@ namespace SwFeatureDebug
                 MainFeedCollectorHoleDiameterMm = 13.0,
                 BranchStartHoleDiameterMm = 13.0,
                 BranchCollectorHoleDiameterMm = 13.0,
-                CollectorTapHoleDiameterMm = 13.0
+                CollectorTapHoleDiameterMm = 13.0,
+                NeutralBranchStartHoleDiameterMm = 13.0,
+                NeutralCollectorTapHoleDiameterMm = 13.0
             };
         }
 
@@ -281,10 +285,15 @@ namespace SwFeatureDebug
 
         public CollectorLayoutV2 CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs)
         {
+            return CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs, _settings.BranchProfile);
+        }
+
+        public CollectorLayoutV2 CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs, BusbarProfile branchProfile)
+        {
             double baseY = loubaoInputs.Max(p => p.HoleCenter.Y) + _settings.CollectorTopClearanceY;
             double collectorY = baseY - phaseIndex * _settings.CollectorPhaseSpacing;
             double collectorZ = loubaoInputs.Average(p => p.HoleCenter.Z) + _settings.CollectorOffsetFromLoubaoInZ;
-            CollectorLengthRangeV2 lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs));
+            CollectorLengthRangeV2 lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs, branchProfile));
 
             return new CollectorLayoutV2
             {
@@ -304,9 +313,10 @@ namespace SwFeatureDebug
             return tap;
         }
 
-        private List<CollectorConnectionExtentV2> CreateConnectionExtents(ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs)
+        private List<CollectorConnectionExtentV2> CreateConnectionExtents(ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs, BusbarProfile branchProfile)
         {
             List<CollectorConnectionExtentV2> extents = new List<CollectorConnectionExtentV2>();
+            BusbarProfile inputProfile = branchProfile ?? _settings.BranchProfile;
 
             if (fuseOut != null)
             {
@@ -326,7 +336,7 @@ namespace SwFeatureDebug
                     {
                         Name = loubaoInput.Name,
                         CenterX = loubaoInput.HoleCenter.X,
-                        HalfSpanX = _settings.BranchProfile.Width / 2.0
+                        HalfSpanX = inputProfile.Width / 2.0
                     });
                 }
             }
@@ -786,6 +796,7 @@ namespace SwFeatureDebug
 
     internal static class BusbarPlanningDemoV2
     {
+        private const string NeutralConductorName = "N";
         private static readonly string[] FuseComponentNameHints = { "fuse", "HR6", "rong", "knife", "isolator" };
         private static readonly string[] LoubaoComponentNameHints = { "loubao", "PGM", "leakage", "breaker" };
 
@@ -978,10 +989,121 @@ namespace SwFeatureDebug
                     collector,
                     rules,
                     settings,
-                    topology));
+                    topology,
+                    settings.CollectorProfile,
+                    rules.MainFeedCollectorFace));
             }
 
+            AddNeutralCollectorAndBranches(
+                plan,
+                foundPoints,
+                loubaos,
+                phaseNames.Length,
+                portRules,
+                collectorPlanner,
+                routePlanner,
+                topology,
+                rules,
+                settings);
+
             return plan;
+        }
+
+        private static void AddNeutralCollectorAndBranches(
+            BusbarPlanV2 plan,
+            List<FoundPoint> foundPoints,
+            List<LoubaoGroupV2> loubaos,
+            int neutralPhaseIndex,
+            ManualPortRuleProvider portRules,
+            CollectorLayoutPlannerV2 collectorPlanner,
+            BusbarRoutePlannerV2 routePlanner,
+            ContactTopologyResolver topology,
+            ManualBusbarRuleSet rules,
+            BusbarSettings settings)
+        {
+            List<ConnectionPort> neutralInputs = CreateNeutralLoubaoInputs(foundPoints, loubaos, portRules);
+            if (neutralInputs.Count == 0)
+            {
+                Console.WriteLine("No N_IN reference points were found. Skip neutral collector and neutral branch busbars.");
+                return;
+            }
+
+            foreach (ConnectionPort neutralInput in neutralInputs)
+                neutralInput.HoleDiameterMm = rules.NeutralBranchStartHoleDiameterMm;
+
+            CollectorLayoutV2 neutralCollector = collectorPlanner.CreateLayout(
+                NeutralConductorName,
+                neutralPhaseIndex,
+                null,
+                neutralInputs,
+                settings.NeutralBranchProfile);
+            plan.Collectors.Add(neutralCollector);
+
+            for (int i = 0; i < neutralInputs.Count; i++)
+            {
+                ConnectionPort branchTap = collectorPlanner.CreateTap(
+                    portRules,
+                    NeutralConductorName,
+                    NeutralConductorName + "_Branch_" + (i + 1) + "_Tap",
+                    neutralInputs[i].HoleCenter.X,
+                    neutralCollector,
+                    rules.BranchCollectorFace);
+                branchTap.HoleDiameterMm = rules.NeutralCollectorTapHoleDiameterMm;
+
+                BusbarV2 branch = CreateBusbar(
+                    "Busbar_" + NeutralConductorName + "_Branch_" + (i + 1) + "_V2",
+                    BusbarKind.Branch,
+                    settings.NeutralBranchProfile,
+                    neutralInputs[i],
+                    branchTap,
+                    rules,
+                    routePlanner,
+                    topology);
+                plan.Busbars.Add(branch);
+            }
+
+            plan.Busbars.Add(CreateCollectorBusbar(
+                NeutralConductorName,
+                neutralCollector,
+                rules,
+                settings,
+                topology,
+                settings.NeutralCollectorProfile,
+                rules.BranchCollectorFace));
+        }
+
+        private static List<ConnectionPort> CreateNeutralLoubaoInputs(
+            List<FoundPoint> foundPoints,
+            List<LoubaoGroupV2> loubaos,
+            ManualPortRuleProvider portRules)
+        {
+            List<ConnectionPort> ports = new List<ConnectionPort>();
+            List<string> missingComponents = new List<string>();
+
+            for (int i = 0; i < loubaos.Count; i++)
+            {
+                FoundPoint neutralPoint = foundPoints.FirstOrDefault(p =>
+                    SameText(p.ComponentName, loubaos[i].ComponentName) &&
+                    SameText(p.PointName, NeutralConductorName + "_IN"));
+                if (neutralPoint == null)
+                {
+                    missingComponents.Add(loubaos[i].ComponentName);
+                    continue;
+                }
+
+                ports.Add(portRules.CreateLoubaoInPort(NeutralConductorName, i + 1, neutralPoint));
+            }
+
+            if (ports.Count > 0 && missingComponents.Count > 0)
+            {
+                throw new Exception(
+                    "Neutral planning found partial N_IN reference points. Missing N_IN in: " +
+                    string.Join(", ", missingComponents.ToArray()));
+            }
+
+            return ports
+                .OrderBy(p => p.HoleCenter.X)
+                .ToList();
         }
 
         private static BusbarV2 CreateCollectorBusbar(
@@ -989,27 +1111,29 @@ namespace SwFeatureDebug
             CollectorLayoutV2 collector,
             ManualBusbarRuleSet rules,
             BusbarSettings settings,
-            ContactTopologyResolver topology)
+            ContactTopologyResolver topology,
+            BusbarProfile profile,
+            ContactFace collectorFace)
         {
             ConnectionPort start = CreateCollectorEndPort(
                 phase,
                 phase + "_Collector_Start",
                 new Point3(collector.StartX, collector.Center.Y, collector.Center.Z),
-                rules.MainFeedCollectorFace,
+                collectorFace,
                 -1);
 
             ConnectionPort end = CreateCollectorEndPort(
                 phase,
                 phase + "_Collector_End",
                 new Point3(collector.EndX, collector.Center.Y, collector.Center.Z),
-                rules.MainFeedCollectorFace,
+                collectorFace,
                 1);
 
             BusbarV2 busbar = new BusbarV2
             {
                 Name = "Busbar_" + phase + "_Collector_V2",
                 Kind = BusbarKind.Collector,
-                Profile = settings.CollectorProfile,
+                Profile = profile,
                 StartPort = start,
                 EndPort = end,
                 Routing = new BusbarRoutingOptions
@@ -1140,11 +1264,15 @@ namespace SwFeatureDebug
                 CollectorThicknessMm = 6.0,
                 BranchWidthMm = 40.0,
                 BranchThicknessMm = 4.0,
+                NeutralCollectorWidthMm = 60.0,
+                NeutralCollectorThicknessMm = 6.0,
+                NeutralBranchWidthMm = 40.0,
+                NeutralBranchThicknessMm = 4.0,
                 CollectorPhaseSpacingMm = 60.0,
-                CollectorTopClearanceYMm = 180.0,
+                CollectorTopClearanceYMm = 240.0,
                 CollectorOffsetFromLoubaoInZMm = 120.0,
                 CollectorNegativeXExtendMm = 50.0,
-                MainCollectorFrontClearanceMm = 0.0,
+                MainCollectorFrontClearanceMm = 200,//转接排第二段的前端间隙，避免碰到母线槽的前端
                 MainCollectorLapDepthRatio = 0.5
             };
         }

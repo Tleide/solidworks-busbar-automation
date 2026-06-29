@@ -71,7 +71,7 @@ Main
 │  ├─ new ContactTopologyResolver
 │  ├─ FindFuseComponent
 │  ├─ FindLoubaoGroups
-│  └─ foreach phase A/B/C
+│  ├─ foreach phase A/B/C
 │     ├─ FindRequiredPoint(phase_OUT)
 │     ├─ ManualPortRuleProvider.CreateFuseOutPort
 │     ├─ FindRequiredPoint(each loubao phase_IN)
@@ -112,9 +112,24 @@ Main
 │        ├─ CreateCollectorEndPort(start/end)
 │        ├─ ContactTopologyResolver.CreateSheetMetalSketchLine
 │        └─ MountingPorts = collector.TapPorts with holes
+│  └─ AddNeutralCollectorAndBranches
+│     ├─ CreateNeutralLoubaoInputs
+│     │  ├─ Find N_IN for each loubao
+│     │  └─ ManualPortRuleProvider.CreateLoubaoInPort(N)
+│     ├─ CollectorLayoutPlannerV2.CreateLayout(N)
+│     │  ├─ CreateConnectionExtents
+│     │  └─ BusbarLengthControllerV2.Calculate
+│     ├─ foreach neutral input
+│     │  ├─ CollectorLayoutPlannerV2.CreateTap(N branch)
+│     │  └─ CreateBusbar(N Branch)
+│     │     ├─ BusbarRoutePlannerV2.CreateRoute
+│     │     ├─ ContactTopologyResolver.CreateSheetMetalSketchLine
+│     │     └─ AddMountingPortIfNeeded(start/end)
+│     └─ CreateCollectorBusbar(N Collector)
 ├─ SelectBusbarsForV2SheetMetalBatch
 │  ├─ FindRequiredV2Busbar(A/B/C MainFeed)
 │  ├─ FindRequiredV2Busbar(A/B/C Collector)
+│  ├─ FindOptionalV2Busbars(N Collector / N Branch)
 │  └─ FindV2Busbars(A/B/C Branch)
 └─ CreateBusbarV2SheetMetalParts
    └─ foreach busbar: CreateBusbarV2SheetMetalPart
@@ -236,9 +251,25 @@ Main
 
 - 输入：扫描点、相名数组、全局设置。
 - 输出：`BusbarPlanV2`。
-- 功能：把原始扫描点转换为完整铜排规划，包括三根转接排、三根汇流排、九根分支排。
+- 功能：把原始扫描点转换为完整铜排规划，包括三根转接排、ABC 汇流排、ABC 分支排；如果存在完整 `N_IN`，再追加 N 汇流排和 N 分支排。
 - 调用者：`Main` 的 V2 路线。
 - 被调用者：规则、端口、汇流排、路径、拓扑等 V2 规划类。
+
+### `AddNeutralCollectorAndBranches(...)`
+
+- 输入：当前规划、扫描点、漏保组、N 相序号、端口规则器、汇流排规划器、路径规划器、拓扑解析器、规则和设置。
+- 输出：无直接返回；向 `BusbarPlanV2.Collectors` 和 `BusbarPlanV2.Busbars` 追加 N 排对象。
+- 功能：在 ABC 主流程后追加 N 汇流排和 N 分支排。没有 `N_IN` 时跳过；只有部分漏保存在 `N_IN` 时抛出错误；完整 `N_IN` 时生成一根 N 汇流排和每个漏保一根 N 分支排。
+- 调用者：`BusbarPlanningDemoV2.BuildPlanFromScannedAssembly`。
+- 被调用者：`CreateNeutralLoubaoInputs`、`CollectorLayoutPlannerV2.CreateLayout`、`CollectorLayoutPlannerV2.CreateTap`、`CreateBusbar`、`CreateCollectorBusbar`。
+
+### `CreateNeutralLoubaoInputs(...)`
+
+- 输入：扫描点、漏保组、端口规则器。
+- 输出：N 相漏保输入端口列表。
+- 功能：逐个漏保查找 `N_IN` 参考点，并转换为 `ConnectionPort`。如果所有漏保都没有 `N_IN`，返回空列表；如果只有部分漏保缺失 `N_IN`，抛出明确异常。
+- 调用者：`AddNeutralCollectorAndBranches`。
+- 被调用者：`ManualPortRuleProvider.CreateLoubaoInPort`。
 
 ### `ManualBusbarRuleSet.CreateDefault(CabinetTopologyKind topologyKind)`
 
@@ -350,9 +381,9 @@ Main
 
 - 输入：完整 V2 规划。
 - 输出：按生成顺序排序的铜排列表。
-- 功能：选择三根转接排、三根汇流排、九根分支排，总计 15 根。
+- 功能：选择三根转接排、ABC 汇流排、可选 N 汇流排、ABC 分支排和可选 N 分支排。当前典设箱完整 `N_IN` 场景下总计 19 根。
 - 调用者：`Main --sheetmetal-v2-all`。
-- 被调用者：`FindRequiredV2Busbar`、`FindV2Busbars`。
+- 被调用者：`FindRequiredV2Busbar`、`FindOptionalV2Busbars`、`FindV2Busbars`。
 
 ### `CreateBusbarV2SheetMetalParts(...)`
 

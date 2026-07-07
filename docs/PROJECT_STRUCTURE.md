@@ -1,83 +1,73 @@
 # 项目结构说明
 
-本仓库围绕 SolidWorks API 的配电箱铜排自动化二次开展开，当前重点是先跑通从装配体参考点到钣金母排生成的完整闭环。
+本仓库围绕 SolidWorks API 的配电箱铜排自动建模展开。当前主工程已经完成第一轮结构拆分，业务层和 SolidWorks 适配层分开维护。
 
 ## `C#/TopToDown`
 
-主程序工程。
-
-职责：
-
-- 连接或启动 SolidWorks。
-- 获取当前活动装配体。
-- 遍历装配体和子零件。
-- 提取命名参考点。
-- 将零部件局部坐标转换为装配体坐标。
-- 根据参考点生成母排中心线路径。
-- 创建 3D 路径草图、截面草图和钣金扫掠特征。
-- 保存生成的母排零件，并插回当前装配体。
-
-核心文件：
+主工程。当前默认运行完整铜排生成流程。
 
 ```text
-C#/TopToDown/TopToDown/Program.cs
+C#/TopToDown/TopToDown
+├─ Program.cs
+├─ App
+├─ CadAbstractions
+├─ Domain
+├─ Planning
+├─ Rules
+├─ SolidWorks
+├─ TopToDown.csproj
+└─ Properties
 ```
+
+核心职责：
+
+- `Program.cs`：应用入口、默认参数、命令行参数。
+- `App`：入口辅助方法。
+- `Domain`：铜排业务模型、端口、点、规格、枚举。
+- `Rules`：当前默认规则和端口规则。
+- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿。
+- `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、保存并插回装配体。
+- `CadAbstractions`：CAD 中立零件规格和后端接口雏形，后续用于 SW/UG 等后端解耦。
 
 ## `C#/FeatureExtract`
 
-独立诊断工具。
-
-职责：
-
-- 连接当前 SolidWorks 会话。
-- 扫描当前零件或装配体。
-- 打印特征名称、特征类型、参考点名称和坐标。
-- 辅助排查模型参考点命名或坐标读取问题。
-
-当主程序没有生成预期母排时，优先使用该工具检查 SolidWorks 模型暴露给 API 的真实数据。
-
-## `C#/.../ReferenceDLL`
-
-SolidWorks Interop 引用 DLL。
-
-这些 DLL 暂时保留在仓库中，方便学习项目在同一 SolidWorks/API 版本族上直接打开和构建。
-
-## `SWtopToDown`
-
-SolidWorks 示例模型目录。
-
-包含：
-
-- 示例装配体
-- 熔断器零件
-- 漏保零件
-- 安装板
-- 骨架零件
-
-生成的母排文件按以下规则忽略：
-
-```text
-Busbar_*.SLDPRT
-```
-
-保留的 `Busbar_Skeleton.SLDPRT` 是样例骨架文件，不属于运行时生成文件。
+诊断工具。用于查看 SolidWorks API 能读取到的特征、参考点和坐标。
 
 ## `docs`
 
-项目文档目录。
+文档目录：
 
-当前包含：
+- `BUSBAR_ARCHITECTURE.md`：铜排建模规则和经验。
+- `CODE_ANALYSIS.md`：代码结构梳理。
+- `SCRIPT_FUNCTION_GUIDE.md`：各脚本、类、函数作用导览。
+- `GIT_WORKFLOW.md`：Git 工作流说明。
+- `PROJECT_STRUCTURE.md`：项目结构说明。
 
-- `PROJECT_STRUCTURE.md`：项目结构说明
-- `CODE_ANALYSIS.md`：代码梳理与任务说明
-- `GIT_WORKFLOW.md`：基础 Git 工作流说明
+## `SWtopToDown`
 
-## 根目录数据文件
+SolidWorks 示例装配和零件目录。
 
-```text
-配电箱二次开发_数据层模板.xlsx
-配电箱二次开发路线图.md
-```
+- `APITest.SLDASM`、`Top-Down.SLDASM`：示例装配体。
+- `fuse24.SLDPRT`、`loubao.SLDPRT`：示例设备。
+- `Busbar_*.SLDPRT`：程序运行生成的铜排零件。
 
-这两个文件用于记录后续数据层、配置层和整体路线图想法。当前主程序仍然以 SolidWorks 钣金母排生成闭环为第一优先级，暂未把 Excel 数据层接入主流程。
+## 数据层
 
+根目录 `数据层.xlsx` 是后续规则和规格数据来源：
+
+- `元件库`
+- `标准件库`
+- `铜排规格库`
+- `电气规则`
+- `相序相色`
+- `枚举`
+
+当前代码尚未读取该 Excel，后续会逐步接入。
+
+## 根目录文档
+
+- `README.md`：项目入口说明。
+- `Architecture.md`：当前架构分析。
+- `BusinessFlow.md`：业务流程分析。
+- `FunctionCallTree.md`：函数调用树。
+- `RefactorProposal.md`：后续重构建议。

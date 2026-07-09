@@ -111,6 +111,16 @@
 | `CollectorLayout` | 某相汇流排的位置、长度、Tap 端口集合。 |
 | `BusbarPlan` | 当前装配体完整铜排规划结果。 |
 
+### `Domain/BusbarHoleModels.cs`
+
+职责：描述铜排搭接孔型规则，不包含具体 CAD API。
+
+| 类/枚举 | 作用 |
+| --- | --- |
+| `BusbarOverlapHolePattern` | 搭接孔型枚举：单孔、直双孔、斜双孔。 |
+| `BusbarOverlapHoleRule` | 单个宽度组合对应的孔位规则：孔型、孔径、偏移量、来源编码。 |
+| `BusbarOverlapHoleRule.Clone()` | 克隆规则对象，避免调用侧修改静态矩阵中的原始规则。 |
+
 ### `Domain/BusbarProfile.cs`
 
 职责：铜排截面规格。
@@ -216,6 +226,17 @@
 | `CreateCollectorTapPort(phase, name, point, face)` | 在汇流排上创建搭接 Tap 端口。 |
 | `CreateDevicePort(...)` | 通用设备端口创建函数。 |
 
+### `Rules/BusbarOverlapRuleMatrix.cs`
+
+职责：固化当前 `铜排搭接逻辑.xlsx` 中 30/40/50/60 宽度组合的 4x4 搭接孔矩阵。
+
+| 函数 | 作用 |
+| --- | --- |
+| `TryResolve(firstWidthMm, secondWidthMm, out rule)` | 按两根铜排宽度查找孔型规则；当前只覆盖 30、40、50、60。 |
+| `CreateRules()` | 创建静态规则矩阵。 |
+| `Single(...) / StraightDouble(...) / DiagonalDouble(...)` | 创建三类孔型规则。 |
+| `NormalizeWidth(widthMm)` | 将宽度四舍五入为整数规格，用于矩阵索引。 |
+
 ## 5. 规划层
 
 ### `Planning/BusbarPlanBuilder.cs`
@@ -239,6 +260,9 @@
 | `ApplyBranchDevicePortRules(...)` | 给分支排设备侧端口设置孔径。 |
 | `ApplyBranchCollectorTapRules(...)` | 给分支排汇流排侧 Tap 设置孔径。 |
 | `ApplyCollectorTapHoleRules(...)` | 给汇流排 Tap 设置孔径。 |
+| `ApplyCollectorOverlapHoleRules(...)` | 在生成中心 Tap 后，根据搭接孔矩阵把中心点展开成实际单孔/双孔孔位，并同步写入连接铜排和汇流排。 |
+| `ReplaceBusbarMountingPort(...)` | 将连接铜排上的中心 Tap 孔替换为搭接规则计算出的实际孔位。 |
+| `ReplaceCollectorTapPort(...)` | 将汇流排布局中的中心 Tap 替换为搭接规则计算出的实际孔位，供汇流排本体打孔。 |
 | `CreateBusbar(...)` | 创建转接排或分支排，生成逻辑路径、草图线和打孔端口。 |
 | `AddMountingPortIfNeeded(...)` | 如果端口孔径有效，就加入铜排打孔列表。 |
 | `CloneConnectionPort(...)` | 克隆端口，避免后续修改原始端口影响打孔数据。 |
@@ -274,6 +298,30 @@
 | `CalculateMainFeedApproachZ(...)` | 计算转接排进入汇流排前的 Z 方向避让位置。 |
 | `CalculateMainFeedApproachOffsetZ(...)` | 当前使用汇流排宽度、转接排宽度、前方净距计算 Z 避让量。 |
 | `MainFeedRouteDecision` | 记录转接排路径决策结果和说明文字。 |
+
+### `Planning/BusbarDirectionResolver.cs`
+
+职责：从铜排中心线和贴合面中推导局部长度方向，供直双孔沿窄排方向偏移。
+
+| 函数 | 作用 |
+| --- | --- |
+| `ResolveLengthDirectionAtPort(busbar, port, fallbackAxis)` | 根据端口所在位置，从铜排中心线推导端口处长度方向，并投影到贴合面内。 |
+| `ResolveAxisDirection(axis, face)` | 将指定坐标轴投影到贴合面内，用作兜底方向。 |
+| `GetPlaneFirstAxis(face)` | 返回贴合面内第一个局部轴，斜双孔使用。 |
+| `GetPlaneSecondAxis(face)` | 返回贴合面内第二个局部轴，斜双孔使用。 |
+| `FindNearestSegmentDirection(...)` | 当端口不在起终点时，找到离端口最近的中心线段方向。 |
+
+### `Planning/BusbarOverlapHolePlanner.cs`
+
+职责：在“搭接中心点”和“实际打孔”之间计算搭接孔位。
+
+| 函数 | 作用 |
+| --- | --- |
+| `CreateCollectorOverlapPorts(...)` | 主入口：根据连接铜排宽度、汇流排宽度、搭接面和方向，返回实际孔位列表。 |
+| `CreateSingle(...)` | 生成单孔，中心点不偏移，仅按规则设置孔径。 |
+| `CreateStraightDouble(...)` | 生成直双孔，沿窄排长度方向正负偏移，偏移量为宽排宽度的四分之一。 |
+| `CreateDiagonalDouble(...)` | 生成斜双孔，按矩阵规则在贴合面内两个局部轴上同时正负偏移。 |
+| `CreateFallbackPorts(...)` | 当宽度组合不在矩阵中时，保留中心孔兜底，避免当前 80mm 等旧规格直接中断生成。 |
 
 ### `Planning/ContactTopologyResolver.cs`
 
@@ -395,7 +443,7 @@
 
 - 改打孔方向。
 - 改孔草图平面。
-- 后续把单孔换成多孔时，这里会消费 `HoleLayoutPlanner` 的结果。
+- 多孔逻辑不在这里判断；这里只消费 `Planning` 层已经展开好的 `MountingPorts`。
 
 | 函数 | 作用 |
 | --- | --- |
@@ -463,6 +511,8 @@
 | --- | --- |
 | 默认铜排规格、相间距、折弯半径 | `Program.cs`、后续迁到 `BusbarGenerationSettings` / `BendRadiusRules` |
 | 端口孔径、端部裕度 | `Rules/ManualBusbarRuleSet.cs`、`Planning/BusbarPlanBuilder.cs` |
+| 搭接孔型、孔数、孔径、偏移 | `Rules/BusbarOverlapRuleMatrix.cs`、`Planning/BusbarOverlapHolePlanner.cs` |
+| 直双孔方向判断 | `Planning/BusbarDirectionResolver.cs` |
 | 刀熔/漏保识别规则 | `Planning/BusbarPlanBuilder.cs` 的 `FindFuseComponent`、`FindLoubaoGroups` |
 | 汇流排位置和长度 | `Planning/CollectorLayoutPlanner.cs` |
 | 转接排/分支排路径 | `Planning/BusbarRoutePlanner.cs` |

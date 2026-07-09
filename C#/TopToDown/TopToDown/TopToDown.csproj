@@ -81,6 +81,7 @@
     <Compile Include="CadAbstractions\CadPartSpecs.cs" />
     <Compile Include="CadAbstractions\ICadSheetMetalBuilder.cs" />
     <Compile Include="Domain\BusbarGenerationSettings.cs" />
+    <Compile Include="Domain\BusbarHoleModels.cs" />
     <Compile Include="Domain\BusbarModels.cs" />
     <Compile Include="Domain\BusbarProfile.cs" />
     <Compile Include="Domain\Enums.cs" />
@@ -90,6 +91,8 @@
     <Compile Include="Domain\SheetMetalBaseFlangeExtent.cs" />
     <Compile Include="Domain\SheetMetalOpenProfilePlane.cs" />
     <Compile Include="Planning\BusbarPlanBuilder.cs" />
+    <Compile Include="Planning\BusbarDirectionResolver.cs" />
+    <Compile Include="Planning\BusbarOverlapHolePlanner.cs" />
     <Compile Include="Planning\BusbarRoutePlanner.cs" />
     <Compile Include="Planning\CollectorLayoutPlanner.cs" />
     <Compile Include="Planning\ContactTopologyResolver.cs" />
@@ -97,6 +100,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Rules\ManualBusbarRuleSet.cs" />
     <Compile Include="Rules\ManualPortRuleProvider.cs" />
+    <Compile Include="Rules\BusbarOverlapRuleMatrix.cs" />
     <Compile Include="SolidWorks\AssemblyScanner.cs" />
     <Compile Include="SolidWorks\BusbarBatchBuilder.cs" />
     <Compile Include="SolidWorks\CadGeometryUtilities.cs" />

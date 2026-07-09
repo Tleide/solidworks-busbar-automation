@@ -23,9 +23,9 @@ C#/TopToDown/TopToDown
 
 - `Program.cs`：应用入口、默认参数、命令行参数。
 - `App`：入口辅助方法。
-- `Domain`：铜排业务模型、端口、点、规格、枚举。
-- `Rules`：当前默认规则和端口规则。
-- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿。
+- `Domain`：铜排业务模型、端口、点、规格、孔型、枚举。
+- `Rules`：当前默认规则、端口规则和搭接孔矩阵。
+- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿和搭接孔位规划。
 - `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、保存并插回装配体。
 - `CadAbstractions`：CAD 中立零件规格和后端接口雏形，后续用于 SW/UG 等后端解耦。
 
@@ -63,6 +63,8 @@ SolidWorks 示例装配和零件目录。
 - `枚举`
 
 当前代码尚未读取该 Excel，后续会逐步接入。
+
+根目录 `铜排搭接逻辑.xlsx` 是当前搭接孔矩阵的人工维护表。代码暂时没有运行时读取该 Excel，而是在 `Rules/BusbarOverlapRuleMatrix.cs` 中固化同等矩阵；这样可以先保持 .NET Framework 项目的依赖简单，后续再迁到数据层读取。
 
 ## 根目录文档
 

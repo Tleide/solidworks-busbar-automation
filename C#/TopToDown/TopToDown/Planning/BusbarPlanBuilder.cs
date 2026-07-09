@@ -19,6 +19,7 @@ namespace SwFeatureDebug
             CollectorLayoutPlanner collectorPlanner = new CollectorLayoutPlanner(rules, settings);
             BusbarRoutePlanner routePlanner = new BusbarRoutePlanner(settings);
             ContactTopologyResolver topology = new ContactTopologyResolver();
+            BusbarOverlapHolePlanner overlapHolePlanner = new BusbarOverlapHolePlanner();
 
             string fuseComponent = FindFuseComponent(foundPoints, phaseNames);
             List<LoubaoGroup> loubaos = FindLoubaoGroups(foundPoints, phaseNames, fuseComponent);
@@ -67,6 +68,7 @@ namespace SwFeatureDebug
                     rules,
                     routePlanner,
                     topology);
+                ApplyCollectorOverlapHoleRules(mainFeed, mainTap, collector, settings.CollectorProfile, overlapHolePlanner);
                 plan.Busbars.Add(mainFeed);
 
                 for (int i = 0; i < loubaoInputs.Count; i++)
@@ -78,7 +80,7 @@ namespace SwFeatureDebug
                         loubaoInputs[i].HoleCenter.X,
                         collector,
                         rules.BranchCollectorFace);
-                    ApplyBranchCollectorTapRules(branchTap, rules);
+                    ApplyBranchCollectorTapRules(branchTap, settings.CollectorProfile, rules);
                     ApplyCollectorTapHoleRules(branchTap, rules);
 
                     Busbar branch = CreateBusbar(
@@ -90,6 +92,7 @@ namespace SwFeatureDebug
                         rules,
                         routePlanner,
                         topology);
+                    ApplyCollectorOverlapHoleRules(branch, branchTap, collector, settings.CollectorProfile, overlapHolePlanner);
                     plan.Busbars.Add(branch);
                 }
 
@@ -140,6 +143,8 @@ namespace SwFeatureDebug
             foreach (ConnectionPort neutralInput in neutralInputs)
                 neutralInput.HoleDiameterMm = rules.NeutralBranchStartHoleDiameterMm;
 
+            BusbarOverlapHolePlanner overlapHolePlanner = new BusbarOverlapHolePlanner();
+
             CollectorLayout neutralCollector = collectorPlanner.CreateLayout(
                 NeutralConductorName,
                 neutralPhaseIndex,
@@ -157,7 +162,7 @@ namespace SwFeatureDebug
                     neutralInputs[i].HoleCenter.X,
                     neutralCollector,
                     rules.BranchCollectorFace);
-                branchTap.HoleDiameterMm = rules.NeutralCollectorTapHoleDiameterMm;
+                ApplyNeutralBranchCollectorTapRules(branchTap, settings.NeutralCollectorProfile, rules);
 
                 Busbar branch = CreateBusbar(
                     "Busbar_" + NeutralConductorName + "_Branch_" + (i + 1),
@@ -168,6 +173,7 @@ namespace SwFeatureDebug
                     rules,
                     routePlanner,
                     topology);
+                ApplyCollectorOverlapHoleRules(branch, branchTap, neutralCollector, settings.NeutralCollectorProfile, overlapHolePlanner);
                 plan.Busbars.Add(branch);
             }
 
@@ -266,6 +272,42 @@ namespace SwFeatureDebug
             return busbar;
         }
 
+        private static void ApplyCollectorOverlapHoleRules(
+            Busbar connectedBusbar,
+            ConnectionPort centerTap,
+            CollectorLayout collector,
+            BusbarProfile collectorProfile,
+            BusbarOverlapHolePlanner overlapHolePlanner)
+        {
+            List<ConnectionPort> overlapPorts = overlapHolePlanner.CreateCollectorOverlapPorts(
+                centerTap,
+                connectedBusbar,
+                collectorProfile,
+                collector.Direction);
+
+            ReplaceBusbarMountingPort(connectedBusbar, centerTap, overlapPorts);
+            ReplaceCollectorTapPort(collector, centerTap, overlapPorts);
+        }
+
+        private static void ReplaceBusbarMountingPort(Busbar busbar, ConnectionPort centerPort, List<ConnectionPort> replacementPorts)
+        {
+            if (busbar.MountingPorts == null)
+                busbar.MountingPorts = new List<ConnectionPort>();
+
+            busbar.MountingPorts.RemoveAll(p => SameText(p.Name, centerPort.Name));
+            busbar.MountingPorts.AddRange(replacementPorts.Select(CloneConnectionPort));
+        }
+
+        private static void ReplaceCollectorTapPort(CollectorLayout collector, ConnectionPort centerPort, List<ConnectionPort> replacementPorts)
+        {
+            int insertIndex = collector.TapPorts.FindIndex(p => SameText(p.Name, centerPort.Name));
+            if (insertIndex < 0)
+                insertIndex = collector.TapPorts.Count;
+
+            collector.TapPorts.RemoveAll(p => SameText(p.Name, centerPort.Name));
+            collector.TapPorts.InsertRange(insertIndex, replacementPorts.Select(CloneConnectionPort).ToList());
+        }
+
         private static ConnectionPort CreateCollectorEndPort(string phase, string name, Point3 point, ContactFace face, int leadSign)
         {
             return new ConnectionPort
@@ -297,9 +339,16 @@ namespace SwFeatureDebug
                 port.HoleDiameterMm = rules.BranchStartHoleDiameterMm;
         }
 
-        private static void ApplyBranchCollectorTapRules(ConnectionPort tap, ManualBusbarRuleSet rules)
+        private static void ApplyBranchCollectorTapRules(ConnectionPort tap, BusbarProfile collectorProfile, ManualBusbarRuleSet rules)
         {
+            tap.EndMarginMm = collectorProfile.WidthMm / 2.0;
             tap.HoleDiameterMm = rules.BranchCollectorHoleDiameterMm;
+        }
+
+        private static void ApplyNeutralBranchCollectorTapRules(ConnectionPort tap, BusbarProfile collectorProfile, ManualBusbarRuleSet rules)
+        {
+            tap.EndMarginMm = collectorProfile.WidthMm / 2.0;
+            tap.HoleDiameterMm = rules.NeutralCollectorTapHoleDiameterMm;
         }
 
         private static void ApplyCollectorTapHoleRules(ConnectionPort tap, ManualBusbarRuleSet rules)

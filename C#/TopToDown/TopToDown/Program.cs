@@ -9,15 +9,15 @@ namespace SwFeatureDebug
             MainFeedWidthMm = 60.0,
             MainFeedThicknessMm = 6.0,
 
-            CollectorWidthMm = 80.0,
-            CollectorThicknessMm = 6.0,
+            CollectorWidthMm = 60.0,
+            CollectorThicknessMm = 8.0,
 
-            BranchWidthMm = 40.0,
+            BranchWidthMm = 30.0,
             BranchThicknessMm = 4.0,
 
-            NeutralCollectorWidthMm = 60.0,
-            NeutralCollectorThicknessMm = 6.0,
-            NeutralBranchWidthMm = 40.0,
+            NeutralCollectorWidthMm = 50.0,
+            NeutralCollectorThicknessMm = 5.0,
+            NeutralBranchWidthMm = 30.0,
             NeutralBranchThicknessMm = 4.0,
 
             CollectorPhaseSpacingMm = 60.0,

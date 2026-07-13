@@ -95,6 +95,22 @@ namespace SwFeatureDebug
 
             return point.Z;
         }
+        private static void LogPartBoundingBox(ModelDoc2 partModel, Busbar busbar)
+        {
+            PartDoc part = partModel as PartDoc;
+            if (part == null)
+                return;
+
+            double[] box = part.GetPartBox(false) as double[];
+            if (box == null || box.Length < 6)
+                return;
+
+            Console.WriteLine(
+                "Part bounding box [" + busbar.Name + "]: " +
+                "Ymin=" + box[1].ToString("F3") + " mm, " +
+                "Ymax=" + box[4].ToString("F3") + " mm");
+        }
+
         private static Feature CreateOffsetPlane(ModelDoc2 partModel, string basePlaneRole, double offset)
         {
             Feature basePlane = FindDefaultPlane(partModel, basePlaneRole);

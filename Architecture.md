@@ -160,3 +160,11 @@ classDiagram
 ## 6. 当前结论
 
 当前项目已经进入“业务规则与 CAD 适配分离”的第一阶段。下一步应优先把固定参数和孔位规则从默认代码迁出，再接入 `数据层.xlsx`，最后把 SolidWorks 层从 `partial Program` 继续收敛成真正的 CAD 后端实现。
+
+## 7. 2026-07 当前实测经验
+
+分支排已支持按相别选择拓扑：ABC 默认生成 `_Lower`、`_Upper` 双排夹接，N 排默认保留单排。该业务选择在 `BusbarPlanBuilder` 完成；`BusbarRoutePlanner` 只负责生成各自路径，`ContactTopologyResolver` 只处理端部裕度与厚度过渡。
+
+实测确认：汇流排路径位于其上表面，分支排搭接端路径位于其下表面。路径参考点、实体接触面和孔草图面必须分开建模；孔型由规划层决定，SolidWorks 层只负责将孔落在真实实体表面。ABC 外侧 `_Upper` 使用专用 Y+/Z- 斜向避让路径，但不改变最终夹接高度或汇流排搭接坐标。
+
+完整公式、失败原因与局部验证流程见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。

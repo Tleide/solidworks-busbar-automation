@@ -14,6 +14,11 @@ namespace SwFeatureDebug
         public double NeutralCollectorThicknessMm;
         public double NeutralBranchWidthMm;
         public double NeutralBranchThicknessMm;
+        public BranchArrangement PhaseBranchArrangement;
+        public BranchArrangement NeutralBranchArrangement;
+        public int DoubleClampUpperStartZSign;
+        public double DoubleClampOuterInitialRiseMm;
+        public double DoubleClampOuterDiagonalMinimumLengthMm;
 
         public double CollectorPhaseSpacingMm;
         public double CollectorTopClearanceYMm;
@@ -41,6 +46,8 @@ namespace SwFeatureDebug
         public double MainLeadOutY { get { return Mm(MainLeadOutYMm); } }
         public double MainCollectorFrontClearance { get { return Mm(MainCollectorFrontClearanceMm); } }
         public double SheetMetalBendRadius { get { return Mm(SheetMetalBendRadiusMm); } }
+        public double DoubleClampOuterInitialRise { get { return Mm(DoubleClampOuterInitialRiseMm); } }
+        public double DoubleClampOuterDiagonalMinimumLength { get { return Mm(DoubleClampOuterDiagonalMinimumLengthMm); } }
 
         public SheetMetalWidthSide GetSheetMetalWidthSide(BusbarKind kind)
         {

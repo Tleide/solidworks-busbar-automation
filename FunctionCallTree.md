@@ -92,3 +92,9 @@ Busbar
 ```
 
 作为新的 CAD 后端边界。SolidWorks 后端实现该接口；如果后续新增 UG/NXOpen，则新增另一个实现，不改 `Domain`、`Rules`、`Planning`。
+
+## 4. 2026-07 双排调用要点
+
+`BusbarPlanBuilder.AddPlannedBranchBusbars(...)` 按相别配置选择拓扑：ABC 默认 `DoubleClamp`，N 默认 `Single`。ABC 的 `_Upper` 设为 `DoubleClampOuterAvoidance` 路径模式，因此 `BusbarRoutePlanner.CreateRoute(...)` 会生成专用的 Y+/Z- 避让路径；`_Lower` 和 N 单排仍走普通路径。
+
+路径生成后才进入 `ContactTopologyResolver` 的端部裕度与厚度过渡，最后由 SolidWorks 层根据真实实体表面创建孔草图和切除。局部实体测试可使用 `--only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper`。详细实测规则见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。

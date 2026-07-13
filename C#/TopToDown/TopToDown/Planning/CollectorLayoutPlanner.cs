@@ -41,7 +41,19 @@ namespace SwFeatureDebug
 
         public ConnectionPort CreateTap(ManualPortRuleProvider ports, string phase, string name, double x, CollectorLayout collector, ContactFace face)
         {
-            Point3 tapPoint = new Point3(x, collector.Center.Y, collector.Center.Z);
+            return CreateTap(ports, phase, name, x, collector, face, 0.0);
+        }
+
+        public ConnectionPort CreateTap(
+            ManualPortRuleProvider ports,
+            string phase,
+            string name,
+            double x,
+            CollectorLayout collector,
+            ContactFace face,
+            double yOffset)
+        {
+            Point3 tapPoint = new Point3(x, collector.Center.Y + yOffset, collector.Center.Z);
             ConnectionPort tap = ports.CreateCollectorTapPort(phase, name, tapPoint, face);
             collector.TapPorts.Add(tap);
             return tap;

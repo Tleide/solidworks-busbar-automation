@@ -133,3 +133,9 @@ UI 层只负责“用户如何输入和覆盖参数”
 ```
 
 不要把 SolidWorks API、Excel 读取、UI 控件状态混到规则计算里。这样后面接电气知识、搭接规则、标准件库和其他 CAD 后端时，改动会比较稳。
+
+## 6. 2026-07 实测经验对重构的约束
+
+双排夹接的实现确认了分层边界：规划层负责 ABC 双排、N 单排、外侧避让等业务意图；拓扑层负责端部裕度和厚度过渡；CAD 层负责验证真实实体表面并执行打孔。三层不能合并成一个大几何函数。
+
+后续 `GenerationRequest`、数据层和 UG/NXOpen 后端应继续消费“路径 + 截面 + 孔位 + 贴合面”的中立业务数据。特别是路径参考坐标、实体接触面坐标和孔草图面坐标不能只用一个端口字段兼任。当前实测结论见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。

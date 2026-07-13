@@ -100,11 +100,8 @@ namespace SwFeatureDebug
 
             while (feature != null)
             {
-                string featureName = feature.Name;
-                string featureType = feature.GetTypeName2();
-
                 if (_verboseFeatureScan)
-                    Console.WriteLine("Feature: " + featureName + "    Type: " + featureType);
+                    Console.WriteLine("Feature: " + feature.Name + "    Type: " + feature.GetTypeName2());
 
                 TryReadReferencePoint(swApp, feature, componentName, componentTransform, foundPoints);
                 feature = feature.GetNextFeature() as Feature;

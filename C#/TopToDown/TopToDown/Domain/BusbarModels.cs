@@ -24,6 +24,7 @@ namespace SwFeatureDebug
     {
         public RouteAxisOrder AxisOrder;
         public ThicknessTransitionPolicy TransitionPolicy;
+        public BranchRouteMode BranchRouteMode;
     }
 
     internal class ConnectionPort
@@ -60,6 +61,7 @@ namespace SwFeatureDebug
     {
         public string Name;
         public BusbarKind Kind;
+        public BranchLegRole BranchLegRole;
         public BusbarProfile Profile;
         public ConnectionPort StartPort;
         public ConnectionPort EndPort;

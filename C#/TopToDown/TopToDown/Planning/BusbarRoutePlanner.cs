@@ -20,12 +20,82 @@ namespace SwFeatureDebug
             _settings = settings;
         }
 
-        public List<Point3> CreateRoute(BusbarKind kind, BusbarProfile profile, ConnectionPort start, ConnectionPort end, RouteAxisOrder axisOrder)
+        public List<Point3> CreateRoute(
+            BusbarKind kind,
+            BusbarProfile profile,
+            ConnectionPort start,
+            ConnectionPort end,
+            BusbarRoutingOptions routing)
         {
             if (kind == BusbarKind.MainFeed)
                 return CreateMainFeedRoute(profile, start, end);
 
-            return CreateSimpleRoute(start, end, axisOrder);
+            if (kind == BusbarKind.Branch && routing.BranchRouteMode == BranchRouteMode.DoubleClampOuterAvoidance)
+                return CreateDoubleClampOuterAvoidanceRoute(profile, start, end);
+
+            return CreateSimpleRoute(start, end, routing.AxisOrder);
+        }
+
+        private List<Point3> CreateDoubleClampOuterAvoidanceRoute(
+            BusbarProfile profile,
+            ConnectionPort start,
+            ConnectionPort end)
+        {
+            Point3 p0 = start.HoleCenter;
+            Point3 p4 = end.HoleCenter;
+            double initialRise = _settings.DoubleClampOuterInitialRise;
+            double minimumDiagonalLength = _settings.DoubleClampOuterDiagonalMinimumLength;
+            double additionalOutsideOffsetZ = profile.Thickness * 2.0;
+
+            if (initialRise <= 0.0)
+                throw new Exception("Double-clamp outer initial rise must be greater than zero.");
+
+            if (minimumDiagonalLength <= 0.0)
+                throw new Exception("Double-clamp outer diagonal minimum length must be greater than zero.");
+
+            if (minimumDiagonalLength <= additionalOutsideOffsetZ)
+            {
+                throw new Exception(
+                    "Double-clamp outer diagonal minimum length must exceed its Z projection. " +
+                    "Diagonal=" + ToMm(minimumDiagonalLength).ToString("0.###") +
+                    "mm, Z projection=" + ToMm(additionalOutsideOffsetZ).ToString("0.###") + "mm.");
+            }
+
+            double diagonalRise = Math.Sqrt(
+                minimumDiagonalLength * minimumDiagonalLength -
+                additionalOutsideOffsetZ * additionalOutsideOffsetZ);
+            double availableRise = p4.Y - p0.Y;
+            double requiredRise = initialRise + diagonalRise;
+
+            if (availableRise + Mm(0.01) < requiredRise)
+            {
+                throw new Exception(
+                    "Double-clamp outer avoidance route has insufficient Y height. " +
+                    "Available=" + ToMm(availableRise).ToString("0.###") +
+                    "mm, required=" + ToMm(requiredRise).ToString("0.###") +
+                    "mm (initial=" + ToMm(initialRise).ToString("0.###") +
+                    ", diagonal projection=" + ToMm(diagonalRise).ToString("0.###") + ").");
+            }
+
+            Point3 p1 = new Point3(p0.X, p0.Y + initialRise, p0.Z);
+            Point3 p2 = new Point3(p0.X, p1.Y + diagonalRise, p1.Z - additionalOutsideOffsetZ);
+            Point3 p3 = new Point3(p0.X, p4.Y, p2.Z);
+
+            List<Point3> points = new List<Point3>();
+            Add(points, p0);
+            Add(points, p1);
+            Add(points, p2);
+            Add(points, p3);
+            Add(points, p4);
+
+            Console.WriteLine(
+                "Double-clamp outer avoidance [" + start.Name + " -> " + end.Name + "]: " +
+                "initial Y+=" + ToMm(initialRise).ToString("0.###") +
+                "mm, diagonal Y+=" + ToMm(diagonalRise).ToString("0.###") +
+                "mm/Z-=" + ToMm(additionalOutsideOffsetZ).ToString("0.###") +
+                "mm, final Y+=" + ToMm(p3.Y - p2.Y).ToString("0.###") + "mm.");
+
+            return points;
         }
 
         private List<Point3> CreateMainFeedRoute(BusbarProfile profile, ConnectionPort start, ConnectionPort end)
@@ -61,6 +131,7 @@ namespace SwFeatureDebug
 
             return points;
         }
+
 
         private MainFeedRouteDecision CalculateMainFeedRouteDecision(BusbarProfile profile, ConnectionPort start, ConnectionPort end)
         {
@@ -119,6 +190,11 @@ namespace SwFeatureDebug
         private static double Mm(double value)
         {
             return value / 1000.0;
+        }
+
+        private static double ToMm(double value)
+        {
+            return value * 1000.0;
         }
     }
 }

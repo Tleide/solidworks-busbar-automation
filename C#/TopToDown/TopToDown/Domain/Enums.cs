@@ -49,11 +49,30 @@ namespace SwFeatureDebug
         ZThenY
     }
 
+    internal enum BranchRouteMode
+    {
+        Standard,
+        DoubleClampOuterAvoidance
+    }
+
     internal enum BusbarKind
     {
         MainFeed,
         Collector,
         Branch
+    }
+
+    internal enum BranchArrangement
+    {
+        Single,
+        DoubleClamp
+    }
+
+    internal enum BranchLegRole
+    {
+        Single,
+        Lower,
+        Upper
     }
 
     internal enum SheetMetalWidthSide

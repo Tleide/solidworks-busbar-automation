@@ -104,3 +104,17 @@ ExcelDataRepository
 ```
 
 这样 UI、Excel、SolidWorks、未来 UG 后端都围绕同一套业务模型和规则工作。
+
+## 6. 2026-07 当前实测流程
+
+默认生成拓扑已经明确为 ABC 双排夹接、N 排单排搭接。ABC 每个漏保生成 `_Lower`、`_Upper` 两根分支排；搭接孔先由宽度矩阵规划为单孔、直双孔或斜双孔，再由 SolidWorks 层在真实实体表面完成贯穿切除。
+
+Z-方向外侧 `_Upper` 从已错层起点出发，经过 Y+ 首段、Y+/Z- 斜向避让、Y+ 上升和 Z+ 回接；起终点和最终搭接高度保持不变。
+
+双排夹接可只生成一个汇流排和一对分支排验证：
+
+```powershell
+TopToDown.exe --only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper
+```
+
+不带 `--keep-existing` 时会先清除旧 `Busbar_*` 组件，便于观察实体贴合、孔位和外侧避让。当前实测下排上表面贴合汇流排下表面，上排下表面贴合汇流排上表面；详细记录见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。

@@ -30,6 +30,16 @@ namespace SwFeatureDebug
 
             selected.AddRange(FindOptionalBusbars(plan, NeutralConductorName, BusbarKind.Branch));
 
+            if (_onlyBusbarNames != null && _onlyBusbarNames.Length > 0)
+            {
+                selected = selected
+                    .Where(b => _onlyBusbarNames.Any(name => SameText(b.Name, name)))
+                    .ToList();
+
+                if (selected.Count == 0)
+                    throw new Exception("No planned busbar matches --only=" + string.Join(",", _onlyBusbarNames));
+            }
+
             Console.WriteLine();
             Console.WriteLine("===== sheet metal batch selection =====");
             Console.WriteLine("Target count: " + selected.Count);
@@ -106,6 +116,7 @@ namespace SwFeatureDebug
             Console.WriteLine(
                 "Sheet metal: MidPlane, R=" + busbar.SheetMetal.BendRadiusMm.ToString("0.###") +
                 "mm, K=" + busbar.SheetMetal.KFactor.ToString("0.###"));
+            Console.WriteLine("Sheet-metal path: " + string.Join(" -> ", busbar.SheetMetalSketchLine.Select(p => p.ToMillimeterText()).ToArray()));
 
             ModelDoc2 partModel = NewPartDocument(swApp);
             ActivateDocument(swApp, partModel);
@@ -116,6 +127,7 @@ namespace SwFeatureDebug
 
             CreateBusbarMountingHoles(swApp, partModel, busbar);
             partModel.EditRebuild3();
+            LogPartBoundingBox(partModel, busbar);
 
             string savePath = SaveBusbarSheetMetalPart(partModel, assemblyModel, busbar);
             InsertPartIntoAssembly(swApp, assemblyModel, assembly, savePath, Path.GetFileNameWithoutExtension(savePath));

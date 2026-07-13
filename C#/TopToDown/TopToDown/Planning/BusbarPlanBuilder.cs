@@ -67,35 +67,31 @@ namespace SwFeatureDebug
                     mainTap,
                     rules,
                     routePlanner,
-                    topology);
-                ApplyCollectorOverlapHoleRules(mainFeed, mainTap, collector, settings.CollectorProfile, overlapHolePlanner);
+                    topology,
+                    BranchLegRole.Single);
+                ApplyCollectorOverlapHoleRules(mainFeed, mainTap, collector, settings.CollectorProfile, overlapHolePlanner, true);
                 plan.Busbars.Add(mainFeed);
 
                 for (int i = 0; i < loubaoInputs.Count; i++)
                 {
-                    ConnectionPort branchTap = collectorPlanner.CreateTap(
+                    AddPlannedBranchBusbars(
+                        plan,
                         portRules,
-                        phase,
-                        phase + "_Branch_" + (i + 1) + "_Tap",
-                        loubaoInputs[i].HoleCenter.X,
-                        collector,
-                        rules.BranchCollectorFace);
-                    ApplyBranchCollectorTapRules(branchTap, settings.CollectorProfile, rules);
-                    ApplyCollectorTapHoleRules(branchTap, rules);
-
-                    Busbar branch = CreateBusbar(
-                        "Busbar_" + phase + "_Branch_" + (i + 1),
-                        BusbarKind.Branch,
-                        settings.BranchProfile,
-                        loubaoInputs[i],
-                        branchTap,
-                        rules,
+                        collectorPlanner,
                         routePlanner,
-                        topology);
-                    ApplyCollectorOverlapHoleRules(branch, branchTap, collector, settings.CollectorProfile, overlapHolePlanner);
-                    plan.Busbars.Add(branch);
+                        topology,
+                        overlapHolePlanner,
+                        rules,
+                        settings,
+                        phase,
+                        i + 1,
+                        loubaoInputs[i],
+                        collector,
+                        settings.BranchProfile,
+                        settings.CollectorProfile,
+                        settings.PhaseBranchArrangement,
+                        false);
                 }
-
                 plan.Busbars.Add(CreateCollectorBusbar(
                     phase,
                     collector,
@@ -155,28 +151,24 @@ namespace SwFeatureDebug
 
             for (int i = 0; i < neutralInputs.Count; i++)
             {
-                ConnectionPort branchTap = collectorPlanner.CreateTap(
+                AddPlannedBranchBusbars(
+                    plan,
                     portRules,
-                    NeutralConductorName,
-                    NeutralConductorName + "_Branch_" + (i + 1) + "_Tap",
-                    neutralInputs[i].HoleCenter.X,
-                    neutralCollector,
-                    rules.BranchCollectorFace);
-                ApplyNeutralBranchCollectorTapRules(branchTap, settings.NeutralCollectorProfile, rules);
-
-                Busbar branch = CreateBusbar(
-                    "Busbar_" + NeutralConductorName + "_Branch_" + (i + 1),
-                    BusbarKind.Branch,
-                    settings.NeutralBranchProfile,
-                    neutralInputs[i],
-                    branchTap,
-                    rules,
+                    collectorPlanner,
                     routePlanner,
-                    topology);
-                ApplyCollectorOverlapHoleRules(branch, branchTap, neutralCollector, settings.NeutralCollectorProfile, overlapHolePlanner);
-                plan.Busbars.Add(branch);
+                    topology,
+                    overlapHolePlanner,
+                    rules,
+                    settings,
+                    NeutralConductorName,
+                    i + 1,
+                    neutralInputs[i],
+                    neutralCollector,
+                    settings.NeutralBranchProfile,
+                    settings.NeutralCollectorProfile,
+                    settings.NeutralBranchArrangement,
+                    true);
             }
-
             plan.Busbars.Add(CreateCollectorBusbar(
                 NeutralConductorName,
                 neutralCollector,
@@ -277,7 +269,8 @@ namespace SwFeatureDebug
             ConnectionPort centerTap,
             CollectorLayout collector,
             BusbarProfile collectorProfile,
-            BusbarOverlapHolePlanner overlapHolePlanner)
+            BusbarOverlapHolePlanner overlapHolePlanner,
+            bool updateCollector)
         {
             List<ConnectionPort> overlapPorts = overlapHolePlanner.CreateCollectorOverlapPorts(
                 centerTap,
@@ -286,7 +279,8 @@ namespace SwFeatureDebug
                 collector.Direction);
 
             ReplaceBusbarMountingPort(connectedBusbar, centerTap, overlapPorts);
-            ReplaceCollectorTapPort(collector, centerTap, overlapPorts);
+            if (updateCollector)
+                ReplaceCollectorTapPort(collector, centerTap, overlapPorts);
         }
 
         private static void ReplaceBusbarMountingPort(Busbar busbar, ConnectionPort centerPort, List<ConnectionPort> replacementPorts)
@@ -306,6 +300,124 @@ namespace SwFeatureDebug
 
             collector.TapPorts.RemoveAll(p => SameText(p.Name, centerPort.Name));
             collector.TapPorts.InsertRange(insertIndex, replacementPorts.Select(CloneConnectionPort).ToList());
+        }
+
+        private static void AddPlannedBranchBusbars(
+            BusbarPlan plan,
+            ManualPortRuleProvider portRules,
+            CollectorLayoutPlanner collectorPlanner,
+            BusbarRoutePlanner routePlanner,
+            ContactTopologyResolver topology,
+            BusbarOverlapHolePlanner overlapHolePlanner,
+            ManualBusbarRuleSet rules,
+            BusbarSettings settings,
+            string phase,
+            int branchIndex,
+            ConnectionPort devicePort,
+            CollectorLayout collector,
+            BusbarProfile branchProfile,
+            BusbarProfile collectorProfile,
+            BranchArrangement arrangement,
+            bool useNeutralTapRules)
+        {
+            if (arrangement != BranchArrangement.DoubleClamp)
+            {
+                ConnectionPort tap = collectorPlanner.CreateTap(
+                    portRules,
+                    phase,
+                    phase + "_Branch_" + branchIndex + "_Tap",
+                    devicePort.HoleCenter.X,
+                    collector,
+                    rules.BranchCollectorFace);
+                ApplyBranchCollectorTapRules(tap, collectorProfile, rules, useNeutralTapRules);
+
+                Busbar branch = CreateBusbar(
+                    "Busbar_" + phase + "_Branch_" + branchIndex,
+                    BusbarKind.Branch,
+                    branchProfile,
+                    devicePort,
+                    tap,
+                    rules,
+                    routePlanner,
+                    topology,
+                    BranchLegRole.Single);
+                ApplyCollectorOverlapHoleRules(branch, tap, collector, collectorProfile, overlapHolePlanner, true);
+                plan.Busbars.Add(branch);
+                return;
+            }
+
+            ConnectionPort lowerTap = collectorPlanner.CreateTap(
+                portRules,
+                phase,
+                phase + "_Branch_" + branchIndex + "_Lower_Tap",
+                devicePort.HoleCenter.X,
+                collector,
+                ContactFace.Lower,
+                -collectorProfile.Thickness / 2.0);
+            ApplyBranchCollectorTapRules(lowerTap, collectorProfile, rules, useNeutralTapRules);
+            // In the current sheet-metal backend, the collector path is its upper surface and the branch path grows toward Y+.
+            double collectorTopY = collector.Center.Y;
+            ConnectionPort lowerRouteEnd = CreateRouteCenterlinePort(
+                lowerTap,
+                collectorTopY - collectorProfile.Thickness - branchProfile.Thickness);
+
+            Busbar lowerBranch = CreateBusbar(
+                "Busbar_" + phase + "_Branch_" + branchIndex + "_Lower",
+                BusbarKind.Branch,
+                branchProfile,
+                devicePort,
+                lowerRouteEnd,
+                rules,
+                routePlanner,
+                topology,
+                BranchLegRole.Single);
+            ApplyCollectorOverlapHoleRules(lowerBranch, lowerTap, collector, collectorProfile, overlapHolePlanner, true);
+            plan.Busbars.Add(lowerBranch);
+
+            ConnectionPort upperTap = collectorPlanner.CreateTap(
+                portRules,
+                phase,
+                phase + "_Branch_" + branchIndex + "_Upper_Tap",
+                devicePort.HoleCenter.X,
+                collector,
+                ContactFace.Upper,
+                collectorProfile.Thickness / 2.0);
+            ApplyBranchCollectorTapRules(upperTap, collectorProfile, rules, useNeutralTapRules);
+            ConnectionPort upperRouteEnd = CreateRouteCenterlinePort(
+                upperTap,
+                collectorTopY);
+
+            double upperStartZOffsetMm = settings.DoubleClampUpperStartZSign * branchProfile.ThicknessMm;
+            ConnectionPort upperStart = CloneConnectionPort(devicePort);
+            upperStart.Name = devicePort.Name + "_Upper_Start";
+            upperStart.HoleCenter = new Point3(
+                devicePort.HoleCenter.X,
+                devicePort.HoleCenter.Y,
+                devicePort.HoleCenter.Z + Mm(upperStartZOffsetMm));
+
+            // The upper branch is physically offset as a whole. Its route starts at the offset point, not at the device face.
+            Busbar upperBranch = CreateBusbar(
+                "Busbar_" + phase + "_Branch_" + branchIndex + "_Upper",
+                BusbarKind.Branch,
+                branchProfile,
+                upperStart,
+                upperRouteEnd,
+                rules,
+                routePlanner,
+                topology,
+                BranchLegRole.Upper,
+                BranchRouteMode.DoubleClampOuterAvoidance);
+            ApplyCollectorOverlapHoleRules(upperBranch, upperTap, collector, collectorProfile, overlapHolePlanner, false);
+            // The lower branch owns the collector through-hole pair; remove the upper temporary center tap.
+            collector.TapPorts.RemoveAll(p => SameText(p.Name, upperTap.Name));
+            plan.Busbars.Add(upperBranch);
+        }
+        // The route is modeled from the backend-defined branch path surface; mounting holes remain on the physical collector contact face.
+        private static ConnectionPort CreateRouteCenterlinePort(ConnectionPort contactPort, double routeCenterY)
+        {
+            ConnectionPort routePort = CloneConnectionPort(contactPort);
+            routePort.HoleCenter = new Point3(contactPort.HoleCenter.X, routeCenterY, contactPort.HoleCenter.Z);
+            return routePort;
         }
 
         private static ConnectionPort CreateCollectorEndPort(string phase, string name, Point3 point, ContactFace face, int leadSign)
@@ -339,10 +451,21 @@ namespace SwFeatureDebug
                 port.HoleDiameterMm = rules.BranchStartHoleDiameterMm;
         }
 
-        private static void ApplyBranchCollectorTapRules(ConnectionPort tap, BusbarProfile collectorProfile, ManualBusbarRuleSet rules)
+        private static void ApplyBranchCollectorTapRules(
+            ConnectionPort tap,
+            BusbarProfile collectorProfile,
+            ManualBusbarRuleSet rules,
+            bool useNeutralTapRules)
         {
+            if (useNeutralTapRules)
+            {
+                ApplyNeutralBranchCollectorTapRules(tap, collectorProfile, rules);
+                return;
+            }
+
             tap.EndMarginMm = collectorProfile.WidthMm / 2.0;
             tap.HoleDiameterMm = rules.BranchCollectorHoleDiameterMm;
+            ApplyCollectorTapHoleRules(tap, rules);
         }
 
         private static void ApplyNeutralBranchCollectorTapRules(ConnectionPort tap, BusbarProfile collectorProfile, ManualBusbarRuleSet rules)
@@ -364,24 +487,28 @@ namespace SwFeatureDebug
             ConnectionPort end,
             ManualBusbarRuleSet rules,
             BusbarRoutePlanner routePlanner,
-            ContactTopologyResolver topology)
+            ContactTopologyResolver topology,
+            BranchLegRole branchLegRole,
+            BranchRouteMode branchRouteMode = BranchRouteMode.Standard)
         {
             Busbar busbar = new Busbar
             {
                 Name = name,
                 Kind = kind,
+                BranchLegRole = branchLegRole,
                 Profile = profile,
                 StartPort = start,
                 EndPort = end,
                 Routing = new BusbarRoutingOptions
                 {
                     AxisOrder = rules.RouteAxisOrder,
-                    TransitionPolicy = rules.TransitionPolicy
+                    TransitionPolicy = rules.TransitionPolicy,
+                    BranchRouteMode = branchRouteMode
                 },
                 SheetMetal = SheetMetalOptions.FromRules(rules)
             };
 
-            busbar.LogicalCenterline = routePlanner.CreateRoute(kind, profile, start, end, rules.RouteAxisOrder);
+            busbar.LogicalCenterline = routePlanner.CreateRoute(kind, profile, start, end, busbar.Routing);
             busbar.SheetMetalSketchLine = topology.CreateSheetMetalSketchLine(busbar);
             AddMountingPortIfNeeded(busbar, start);
             AddMountingPortIfNeeded(busbar, end);

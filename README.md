@@ -88,3 +88,13 @@ N_IN                       漏保 N 相进线端孔中心，可选；如果出�
 - [RefactorProposal.md](RefactorProposal.md)
 - [docs/SCRIPT_FUNCTION_GUIDE.md](docs/SCRIPT_FUNCTION_GUIDE.md)
 - [docs/BUSBAR_ARCHITECTURE.md](docs/BUSBAR_ARCHITECTURE.md)
+- [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)
+
+## 2026-07 当前能力补充
+
+- ABC 分支排默认采用双排夹接：`_Lower` 贴合汇流排下表面，Z-方向外侧 `_Upper` 贴合汇流排上表面；N 排默认采用传统单排。
+- 搭接孔已按宽度矩阵规划为单孔、直双孔或斜双孔，并在真实铜排实体表面完成贯穿切除。
+- 外侧上排采用 Y+ 首段、Y+/Z- 斜向避让、Y+ 上升、Z+ 回接的路径；起终点和汇流排搭接高度不变。
+- 可用 `--only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper` 做三件局部装配验证；不带 `--keep-existing` 时会先清除旧 `Busbar_*` 组件。
+
+双排高度、孔草图面、路径参数及已排查的错误见 `docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md`。

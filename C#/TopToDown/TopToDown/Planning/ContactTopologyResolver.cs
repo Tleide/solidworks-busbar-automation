@@ -26,7 +26,9 @@ namespace SwFeatureDebug
                 return ResolveMainFeedTopology(busbar);
 
             if (busbar.Kind == BusbarKind.Branch)
-                return ContactTopologyKind.SameSide;
+                return busbar.BranchLegRole == BranchLegRole.Lower
+                    ? ContactTopologyKind.DifferentSide
+                    : ContactTopologyKind.SameSide;
 
             return ContactTopologyKind.SameSide;
         }
@@ -93,7 +95,9 @@ namespace SwFeatureDebug
                 return ResolveMainFeedTopology(busbar);
 
             if (busbar.Kind == BusbarKind.Branch)
-                return ContactTopologyKind.SameSide;
+                return busbar.BranchLegRole == BranchLegRole.Lower
+                    ? ContactTopologyKind.DifferentSide
+                    : ContactTopologyKind.SameSide;
 
             return ContactTopologyKind.SameSide;
         }

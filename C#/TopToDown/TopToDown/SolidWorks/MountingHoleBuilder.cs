@@ -35,7 +35,9 @@ namespace SwFeatureDebug
                 "mm, face=" + port.RequiredFace +
                 ", center=" + port.HoleCenter.ToMillimeterText());
 
-            SheetMetalOpenProfilePlane holePlane = GetHoleSketchPlane(port);
+            SheetMetalOpenProfilePlane holePlane = busbar.Kind == BusbarKind.Collector
+                ? GetCollectorHoleSketchPlane(busbar)
+                : GetBranchCollectorHoleSketchPlane(busbar, port) ?? GetHoleSketchPlane(port);
             Feature plane = CreateOffsetPlane(partModel, holePlane.BasePlaneRole, holePlane.Offset);
             partModel.EditRebuild3();
 
@@ -61,16 +63,24 @@ namespace SwFeatureDebug
                 if (modelToSketch == null)
                     throw new Exception("Failed to get hole sketch transform: " + busbar.Name + " " + role);
 
-                Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(swApp, port.HoleCenter, modelToSketch));
+                bool useDerivedTopPlane = busbar.Kind == BusbarKind.Collector ||
+                    (busbar.Kind == BusbarKind.Branch && port.Kind == PortKind.CollectorTap);
+                Point3 holeCenter = useDerivedTopPlane
+                    ? new Point3(port.HoleCenter.X, holePlane.Offset, port.HoleCenter.Z)
+                    : port.HoleCenter;
+                Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(swApp, holeCenter, modelToSketch));
                 double radius = Mm(port.HoleDiameterMm) / 2.0;
                 SketchSegment circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
                 if (circle == null)
                     throw new Exception("Failed to create mounting hole circle: " + busbar.Name + " " + role);
 
+                ConnectionPort cutPort = busbar.Kind == BusbarKind.Collector
+                    ? CreateCollectorSurfaceCutPort(port, holePlane.Offset)
+                    : CreateBranchCollectorSurfaceCutPort(busbar, port, holePlane.Offset) ?? port;
                 Feature activeSketchCut = CreateDirectedBlindCutFromActiveSketch(
                     partModel,
                     busbar.Name + "_HoleCut_" + role,
-                    port,
+                    cutPort,
                     busbar.Profile.Thickness);
 
                 if (activeSketchCut != null)
@@ -103,6 +113,64 @@ namespace SwFeatureDebug
                 busbar.Profile.Thickness);
             if (cut == null)
                 throw new Exception("Failed to create mounting hole cut: " + busbar.Name + " " + role);
+        }
+
+        // Branch overlap holes are derived from the actual sheet-metal path, not from the collector tap coordinate.
+        private static SheetMetalOpenProfilePlane GetBranchCollectorHoleSketchPlane(Busbar busbar, ConnectionPort port)
+        {
+            if (busbar.Kind != BusbarKind.Branch || port.Kind != PortKind.CollectorTap ||
+                busbar.SheetMetalSketchLine == null || busbar.SheetMetalSketchLine.Count == 0)
+                return null;
+
+            double routeEndY = busbar.SheetMetalSketchLine[busbar.SheetMetalSketchLine.Count - 1].Y;
+            double surfaceY = port.RequiredFace == ContactFace.Lower
+                ? routeEndY + busbar.Profile.Thickness
+                : routeEndY;
+            return new SheetMetalOpenProfilePlane("Top", surfaceY, AxisDirection.X, AxisDirection.Z);
+        }
+
+        private static ConnectionPort CreateBranchCollectorSurfaceCutPort(Busbar busbar, ConnectionPort source, double surfaceY)
+        {
+            if (busbar.Kind != BusbarKind.Branch || source.Kind != PortKind.CollectorTap)
+                return null;
+
+            ConnectionPort port = new ConnectionPort
+            {
+                Name = source.Name,
+                ComponentName = source.ComponentName,
+                Kind = source.Kind,
+                HoleCenter = new Point3(source.HoleCenter.X, surfaceY, source.HoleCenter.Z),
+                RequiredFace = source.RequiredFace == ContactFace.Lower ? ContactFace.Upper : ContactFace.Lower,
+                PreferredLeadAxis = source.PreferredLeadAxis,
+                PreferredLeadSign = source.PreferredLeadSign,
+                EndMarginMm = source.EndMarginMm,
+                HoleDiameterMm = source.HoleDiameterMm
+            };
+            return port;
+        }
+
+        // All collector holes share the upper thickness surface; hole patterns only determine X/Z coordinates.
+        private static SheetMetalOpenProfilePlane GetCollectorHoleSketchPlane(Busbar collector)
+        {
+            double upperSurfaceY = collector.LogicalCenterline[0].Y;
+            return new SheetMetalOpenProfilePlane("Top", upperSurfaceY, AxisDirection.X, AxisDirection.Z);
+        }
+
+        private static ConnectionPort CreateCollectorSurfaceCutPort(ConnectionPort source, double surfaceY)
+        {
+            ConnectionPort port = new ConnectionPort
+            {
+                Name = source.Name,
+                ComponentName = source.ComponentName,
+                Kind = source.Kind,
+                HoleCenter = new Point3(source.HoleCenter.X, surfaceY, source.HoleCenter.Z),
+                RequiredFace = ContactFace.Upper,
+                PreferredLeadAxis = source.PreferredLeadAxis,
+                PreferredLeadSign = source.PreferredLeadSign,
+                EndMarginMm = source.EndMarginMm,
+                HoleDiameterMm = source.HoleDiameterMm
+            };
+            return port;
         }
 
         private static SheetMetalOpenProfilePlane GetHoleSketchPlane(ConnectionPort port)

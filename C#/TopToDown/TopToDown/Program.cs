@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace SwFeatureDebug
 {
@@ -19,6 +20,11 @@ namespace SwFeatureDebug
             NeutralCollectorThicknessMm = 5.0,
             NeutralBranchWidthMm = 30.0,
             NeutralBranchThicknessMm = 4.0,
+            PhaseBranchArrangement = BranchArrangement.DoubleClamp,
+            NeutralBranchArrangement = BranchArrangement.Single,
+            DoubleClampUpperStartZSign = -1,
+            DoubleClampOuterInitialRiseMm = 50.0,
+            DoubleClampOuterDiagonalMinimumLengthMm = 50.0,
 
             CollectorPhaseSpacingMm = 60.0,
             CollectorTopClearanceYMm = 240.0,
@@ -42,6 +48,7 @@ namespace SwFeatureDebug
         private static bool _replaceExistingBusbar = true;
         private static bool _verboseFeatureScan;
         private static bool _previewOnly;
+        private static string[] _onlyBusbarNames;
 
         [STAThread]
         private static void Main(string[] args)
@@ -80,6 +87,16 @@ namespace SwFeatureDebug
                 if (SameText(arg, "--preview"))
                 {
                     _previewOnly = true;
+                    continue;
+                }
+
+                const string onlyPrefix = "--only=";
+                if (arg != null && arg.StartsWith(onlyPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    _onlyBusbarNames = arg.Substring(onlyPrefix.Length)
+                        .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(name => name.Trim())
+                        .ToArray();
                     continue;
                 }
             }

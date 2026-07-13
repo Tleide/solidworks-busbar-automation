@@ -82,6 +82,7 @@ DirToUse = 1
 - 若没有任何 `N_IN`，跳过 N 相生成。
 - 若只存在部分 `N_IN`，直接报错，避免生成不完整 N 排。
 - N 排规格独立于 ABC，可后续接入标准校核和自动选型。
+- 分支排拓扑独立于 ABC：默认 `NeutralBranchArrangement = Single`，N 排沿用传统单排路径；ABC 默认 `PhaseBranchArrangement = DoubleClamp`。
 
 ## 7. 铜排搭接孔位规则
 
@@ -99,7 +100,25 @@ DirToUse = 1
 
 暂时只覆盖 30/40/50/60。若遇到未覆盖规格，例如当前 ABC 汇流排默认 `80mm`，规划器会保留原中心孔兜底并输出日志，避免破坏旧流程。
 
-## 8. 后续重点
+## 8. 分支排双排夹接
+
+当前可通过 `BusbarSettings.PhaseBranchArrangement` 和 `BusbarSettings.NeutralBranchArrangement` 分别选择 ABC、N 排的分支排实现方式：
+
+- `Single`：每个漏保进线点生成一根传统分支排。
+- `DoubleClamp`：每个漏保进线点生成 `_Lower`、`_Upper` 两根分支排，分别夹接在汇流排下表面和上表面。
+
+默认配置为 ABC `DoubleClamp`、N 排 `Single`。上排起点错层方向由 `DoubleClampUpperStartZSign` 控制；当前值 `-1` 表示从漏保处先向 `Z-` 偏移一个分支排厚度。
+
+ABC 双排中的 `_Upper` 是 Z-方向外侧排。它在已错层的起点上采用专用避让路径：先沿 `Y+` 引出 `DoubleClampOuterInitialRiseMm`，再沿 `Y+ / Z-` 斜向外伸，斜段的额外 Z 投影固定为 `2 × 分支排厚度`，实际长度不小于 `DoubleClampOuterDiagonalMinimumLengthMm`，随后沿 `Y+` 到达原有搭接高度，最后沿 `Z+` 回到原有汇流排搭接点。默认首段和斜段最小实际长度均为 `50mm`。起点、终点、搭接高度和最终 Z 坐标保持不变。
+
+若起终点可用的 Y 高度不足以容纳首段和斜段，规划会报出明确的约束冲突，不会缩短斜段来勉强生成。
+
+双排夹接的高度和打孔基准面必须以 SolidWorks 实际生成实体的表面方向为准，不能按“路径天然位于厚度中面”推导。经边界框实测，当前后端中汇流排路径位于上表面，分支排搭接端路径位于下表面。
+
+完整的实体方向、上下排高度公式、孔草图平面规则、已踩过的错误和验证步骤见 [双排夹接实现与几何验证记录](DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。
+
+汇流排本体只采用一套搭接孔位；上、下分支排各自在自己的铜排上建立对应孔位，不重复在汇流排上创建重叠的切除特征。
+## 9. 后续重点
 
 - 后续把 `BusbarOverlapRuleMatrix` 从代码固化升级为数据层读取，优先考虑 CSV 或 Excel 转换结果。
 - 把折弯半径从固定值抽成 `BendRadiusRules`，支持铜排厚度、工艺规则和 UI/数据层覆盖。

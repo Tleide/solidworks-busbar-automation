@@ -90,6 +90,8 @@
 | `CollectorOffsetFromLoubaoInZMm` | 汇流排相对漏保的 Z 偏移。 |
 | `CollectorNegativeXExtendMm` | 汇流排 X- 侧外伸。 |
 | `MainLeadOutYMm` | 转接排从刀熔端初始 Y 方向引出距离。 |
+| `DoubleClampOuterInitialRiseMm` | 双排夹接 Z-方向外侧上排从漏保端先沿 Y+ 引出的距离，默认 `50mm`。 |
+| `DoubleClampOuterDiagonalMinimumLengthMm` | 外侧上排斜向避让段的最小实际长度，默认 `50mm`。 |
 | `SheetMetalBendRadiusMm` | 当前默认折弯半径。后续应迁到 `BendRadiusRules`。 |
 | `SheetMetalKFactor` | 钣金 K 因子。 |
 | `MainCollectorFrontClearanceMm` | 转接排靠近汇流排前的 Z 向避让距离。 |
@@ -104,10 +106,10 @@
 | --- | --- |
 | `SheetMetalOptions` | 钣金规则结果：折弯半径、K 因子、宽度模式。 |
 | `SheetMetalOptions.FromRules(rules)` | 从当前规则集生成钣金选项。 |
-| `BusbarRoutingOptions` | 路径规则选项：轴顺序、厚度过渡策略。 |
+| `BusbarRoutingOptions` | 路径规则选项：轴顺序、厚度过渡策略和分支排路径模式。 |
 | `ConnectionPort` | 可连接铜排的工程端口，包含孔中心、贴合面、引出方向、端部裕度、孔径。 |
 | `ConnectionPort.ToString()` | 调试日志用，输出端口详细信息。 |
-| `Busbar` | 一根铜排，包括起终端口、规格、逻辑中心线、钣金草图线、打孔端口。 |
+| `Busbar` | 一根铜排，包括起终端口、规格、分支腿角色、逻辑中心线、钣金草图线、打孔端口。 |
 | `CollectorLayout` | 某相汇流排的位置、长度、Tap 端口集合。 |
 | `BusbarPlan` | 当前装配体完整铜排规划结果。 |
 
@@ -284,15 +286,23 @@
 | `CollectorConnectionExtent` | 一个连接点在 X 方向的占用范围。 |
 | `BusbarLengthController.Calculate(...)` | 根据所有连接范围计算汇流排 StartX/EndX。 |
 
+### `Planning/BusbarPlanBuilder.cs` 中的双排夹接
+
+| 函数 | 作用 |
+| --- | --- |
+| `AddPlannedBranchBusbars(...)` | 根据 `BranchArrangement` 生成传统单分支，或生成下搭接 `_Lower` 与上搭接 `_Upper` 两根分支排。 |
+| `BranchLegRole.Lower` | 下排目标为汇流排下表面，并按异侧规则加入分支排厚度补偿。 |
+| `BranchLegRole.Upper` | 上排目标为汇流排上表面，路径在漏保端先做 Z 向错层，并使用 Z-方向外侧避让路线。 |
 ### `Planning/BusbarRoutePlanner.cs`
 
 职责：生成孔中心意义上的逻辑路径。
 
 | 函数/类 | 作用 |
 | --- | --- |
-| `CreateRoute(...)` | 根据铜排类型选择转接排路径或简单路径。 |
+| `CreateRoute(...)` | 根据铜排类型和路径模式选择转接排、简单分支或双排外侧避让路径。 |
 | `CreateMainFeedRoute(...)` | 生成刀熔到汇流排的转接排折线路径。 |
-| `CreateSimpleRoute(...)` | 生成分支排简单折线路径。 |
+| `CreateSimpleRoute(...)` | 生成单排或双排下搭接的简单折线路径。 |
+| `CreateDoubleClampOuterAvoidanceRoute(...)` | 生成双排 Z-方向外侧上排路径：Y+ 首段、Y+/Z- 斜向避让、Y+ 上升、Z+ 回到原搭接点；并校验最小斜段长度和可用高度。 |
 | `CalculateMainFeedRouteDecision(...)` | 计算转接排 Y 引出和 Z 避让策略。 |
 | `CalculateMainFeedLeadOutY(...)` | 根据端口引出方向计算初始 Y 引出距离。 |
 | `CalculateMainFeedApproachZ(...)` | 计算转接排进入汇流排前的 Z 方向避让位置。 |

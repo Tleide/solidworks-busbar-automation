@@ -33,7 +33,7 @@
 | `_verboseFeatureScan` | 是否输出详细特征扫描日志。 |
 | `_previewOnly` | 是否只生成预览骨架。 |
 | `Main(args)` | 程序入口，负责异常处理并调用 `RunSolidWorksGeneration()`。 |
-| `ConfigureFromArgs(args)` | 解析 `--verbose`、`--keep-existing`、`--preview`。 |
+| `ConfigureFromArgs(args)` | 解析 `--verbose`、`--keep-existing`、`--preview`、`--validate`、`--verify-geometry`。 |
 
 ### `App/ProgramUtilities.cs`
 
@@ -83,6 +83,10 @@
 | `MainFeedWidthMm / MainFeedThicknessMm` | 转接排规格。 |
 | `CollectorWidthMm / CollectorThicknessMm` | ABC 汇流排规格。 |
 | `BranchWidthMm / BranchThicknessMm` | ABC 分支排规格。 |
+| `PhaseBranchRules` | ABC 漏保额定电流到分支排规格和默认单双排的代码内规则表；当前覆盖 `250A/4x20/单排`、`400A/4x30/双排`、`630A/4x40/双排`。 |
+| `PhaseBranchArrangementOverride` | 项目级 ABC 拓扑覆盖。为 `null` 时使用每台漏保规则默认值；设置为单排或双排时统一覆盖拓扑。 |
+| `NeutralBranchRules` | N 排独立的额定电流到分支排规格和默认单双排规则表；当前为 `250A/4x20/单排`、`400A/4x30/单排`、`630A/4x40/单排`。 |
+| `NeutralBranchArrangementOverride` | 项目级 N 排拓扑覆盖。为 `null` 时使用每台漏保的 N 排规则。 |
 | `NeutralCollectorWidthMm / NeutralCollectorThicknessMm` | N 汇流排规格。 |
 | `NeutralBranchWidthMm / NeutralBranchThicknessMm` | N 分支排规格。 |
 | `CollectorPhaseSpacingMm` | 汇流排相间距。 |
@@ -170,6 +174,11 @@
 | --- | --- |
 | `ComponentName` | 漏保组件名。 |
 | `CenterX` | 该漏保所有进线点的平均 X，用于排序。 |
+| `RatedCurrentA` | 从组件名称按已配置规则解析出的漏保最大电流。 |
+| `BranchProfile` | 该漏保专属的 ABC 分支排宽度与厚度。 |
+| `BranchArrangement` | 该漏保规则给出的默认单排或双排拓扑。 |
+| `NeutralBranchProfile` | 该漏保专属的 N 分支排宽度与厚度，来自独立 N 排规则表。 |
+| `NeutralBranchArrangement` | 该漏保 N 排规则给出的默认单排或双排拓扑。 |
 
 ### `Domain/Point3.cs`
 
@@ -270,6 +279,8 @@
 | `CloneConnectionPort(...)` | 克隆端口，避免后续修改原始端口影响打孔数据。 |
 | `FindFuseComponent(...)` | 从扫描点里识别刀熔组件。 |
 | `FindLoubaoGroups(...)` | 从扫描点里识别漏保组件并按 X 排序。 |
+| `ParseRatedCurrentA(...)` | 从漏保组件名称中严格匹配已配置的额定电流标记；无法唯一匹配时直接报错。 |
+| `ResolvePhaseBranchRule(...)` | 根据额定电流取得分支排规格和默认单双排规则。 |
 | `FindRequiredPoint(...)` | 查找必需参考点，缺失时报错。 |
 | `ScoreNameHint(...)` | 根据组件名关键词给刀熔/漏保识别打分。 |
 
@@ -281,7 +292,7 @@
 | --- | --- |
 | `CreateLayout(...)` | 根据相序、刀熔端口、漏保端口计算汇流排中心、Y/Z 位置和 X 范围。 |
 | `CreateTap(...)` | 在汇流排指定 X 位置创建 Tap 端口。 |
-| `CreateConnectionExtents(...)` | 根据连接铜排宽度计算汇流排长度覆盖范围。 |
+| `CreateConnectionExtents(...)` | 根据每台漏保对应的连接铜排宽度计算汇流排长度覆盖范围。 |
 | `CollectorLengthRange` | 汇流排 X 起止范围。 |
 | `CollectorConnectionExtent` | 一个连接点在 X 方向的占用范围。 |
 | `BusbarLengthController.Calculate(...)` | 根据所有连接范围计算汇流排 StartX/EndX。 |
@@ -291,7 +302,7 @@
 | 函数 | 作用 |
 | --- | --- |
 | `AddPlannedBranchBusbars(...)` | 根据 `BranchArrangement` 生成传统单分支，或生成下搭接 `_Lower` 与上搭接 `_Upper` 两根分支排。 |
-| `BranchLegRole.Lower` | 下排目标为汇流排下表面，并按异侧规则加入分支排厚度补偿。 |
+| 下搭接分支 | 下排目标为汇流排下表面；当前在 `BusbarPlanBuilder` 直接使用已推导的终点高度公式，并保留 `BranchLegRole.Single`，避免 `ContactTopologyResolver` 再次加入同一份厚度补偿。 |
 | `BranchLegRole.Upper` | 上排目标为汇流排上表面，路径在漏保端先做 Z 向错层，并使用 Z-方向外侧避让路线。 |
 ### `Planning/BusbarRoutePlanner.cs`
 
@@ -333,6 +344,45 @@
 | `CreateDiagonalDouble(...)` | 生成斜双孔，按矩阵规则在贴合面内两个局部轴上同时正负偏移。 |
 | `CreateFallbackPorts(...)` | 当宽度组合不在矩阵中时，保留中心孔兜底，避免当前 80mm 等旧规格直接中断生成。 |
 
+### `Planning/BusbarPreflightValidator.cs`
+
+职责：在进入 SolidWorks 建模前，验证配置和已经生成的 `BusbarPlan` 是否满足独立的工程契约。它只读取规划结果，不创建零件、不删除装配组件，也不重新调用路径规划器。
+
+| 类/函数 | 作用 |
+| --- | --- |
+| `BusbarPreflightReport` | 保存 `INFO`、`WARNING`、`ERROR` 消息，统计结果并输出 PowerShell 控制台报告。未来 UI 直接消费该对象。 |
+| `ValidateConfiguration(settings)` | 验证规格、ABC/N 电流选型表、单双排枚举和汇流排基础参数。 |
+| `ValidatePlan(plan, settings, phaseNames)` | 验证实际选型、汇流排范围、分支数量、孔位对应关系和双排几何契约。 |
+| `ValidateDoubleClampRoutes(...)` | 验证上下排终点高度、上排 Z 错层和外侧避让路径的首段、斜段、回接关系。 |
+| `CreatePlanningFailure(exception)` | 将扫描或规划阶段的异常转换为统一的预检错误报告。 |
+
+### `Domain/FastenerModels.cs` 与 `Planning/FastenerPlanBuilder.cs`
+
+职责：为已知的铜排-汇流排搭接孔生成标准件选型结果，并将结果交给预检报告。当前标准件数值在 `Program.cs` 中与数据层工作簿保持同步，后续可替换为 Excel Repository。
+
+| 类/函数 | 作用 |
+| --- | --- |
+| `FastenerSpec` | 描述 M 规格、通孔直径、标准公称长度、弹垫压平厚度、平垫尺寸、螺母高度和螺栓头尺寸。 |
+| `FastenerJointPlan` | 保存一个实际搭接孔对应的螺栓选择、夹紧厚度、所需长度和实际露出量。 |
+| `BuildCollectorJoints(...)` | 将主排/分支排的汇流排搭接孔按相位和 X/Z 孔位分组；双排上下排共享同一组贯穿螺栓。 |
+| `BuildSelection(...)` | 按孔径匹配 M 规格，计算最小长度并选择最短可用标准长度。 |
+
+### `Reporting/ProductionReportExporter.cs`
+
+职责：把完整的 `BusbarPlan` 转换成生产和加工所需的 Excel 报表，不依赖 SolidWorks 实体。它生成漏保选型、铜排汇总、逐根铜排下料明细、钻孔清单、标准件汇总与螺栓明细。
+
+| 类/函数 | 作用 |
+| --- | --- |
+| `ProductionReportExporter.Export(...)` | 从规划对象计算各表数据，并输出 `.xlsx` 文件。 |
+| `CalculateRouteMetrics(...)` | 以 `SheetMetalSketchLine` 计算含端部余量的路径长度、折弯数和按 R/K/t 估算的展开长度。 |
+| `BuildCopperSummarySheet(...)` | 按铜排规格汇总数量、总长度、折弯数与孔数。 |
+| `BuildLoubaoSelectionSheet(...)` | 输出每台漏保的额定电流、ABC/N 铜排规格和单/双排拓扑。 |
+| `BuildHoleSheet(...)` | 输出每根实体铜排上的孔径、用途和装配体坐标。 |
+| `BuildFastenerSummarySheet(...)` | 从搭接螺栓计划推导螺栓、两片平垫、弹垫和螺母的数量。 |
+| `ProductionReportWorkbookWriter` | 不依赖 Excel 或第三方 NuGet 包，直接写出包含六个工作表的 `.xlsx` 文件。 |
+
+命令行参数 `--export-report` 会在预检通过后只导出报表，不修改装配体；完整建模和实体校验成功后也会自动导出报表。
+
 ### `Planning/ContactTopologyResolver.cs`
 
 职责：从逻辑路径生成实际钣金草图线，处理端部裕度和厚度补偿。
@@ -370,7 +420,20 @@
 
 | 函数 | 作用 |
 | --- | --- |
-| `RunSolidWorksGeneration()` | 连接 SW、扫描、生成计划、预览或实体生成。 |
+| `RunSolidWorksGeneration()` | 先校验配置，再连接 SW、扫描、生成计划和预检；只有预检通过后才会删除旧件并预览或生成实体。`--validate` 在预检报告后直接退出；`--verify-geometry` 只读取既有实体；正常实体生成完成后自动调用实体校验。 |
+
+### `SolidWorks/BusbarGeometryVerifier.cs`
+
+职责：读取已经插入装配的 `Busbar_*` 零件，验证实际实体而非规划数据。此模块只读，不会修改 SolidWorks 模型。
+
+| 函数/类 | 作用 |
+| --- | --- |
+| `Verify(...)` | 主入口：将计划铜排与装配组件匹配，输出实体校验报告。 |
+| `FindGeneratedComponents(...)` | 查找装配中的 `Busbar_*` 组件，并兼容 SolidWorks 实例后缀与保存文件名后缀。 |
+| `GetAssemblyBounds(...)` | 用 `Component2.GetBox(false, false)` 获取装配坐标系下的真实实体边界框。 |
+| `ValidateProfileEnvelope(...)` | 检查主/分支排宽度、汇流排宽度和厚度是否符合计划规格。 |
+| `ValidateHoleFeatures(...)` | 检查每个预期 `HoleCut_P*` 特征和 `ExtrudeFeatureData2` 切除深度。 |
+| `ValidateDoubleClampSurfaceContacts(...)` | 根据实体边界框验证上下分支排分别贴合汇流排下、上表面。 |
 
 ### `SolidWorks/SolidWorksSession.cs`
 
@@ -525,6 +588,9 @@
 | 直双孔方向判断 | `Planning/BusbarDirectionResolver.cs` |
 | 刀熔/漏保识别规则 | `Planning/BusbarPlanBuilder.cs` 的 `FindFuseComponent`、`FindLoubaoGroups` |
 | 汇流排位置和长度 | `Planning/CollectorLayoutPlanner.cs` |
+| 生成前规则预检与控制台报告 | `Planning/BusbarPreflightValidator.cs` |
+| 生成后实体、孔深度、双排表面贴合校验 | `SolidWorks/BusbarGeometryVerifier.cs` |
+| 搭接螺栓规格与长度选型 | `Domain/FastenerModels.cs`、`Planning/FastenerPlanBuilder.cs` |
 | 转接排/分支排路径 | `Planning/BusbarRoutePlanner.cs` |
 | 同侧/异侧、厚度补偿 | `Planning/ContactTopologyResolver.cs` |
 | 打孔方向和孔草图 | `SolidWorks/MountingHoleBuilder.cs` |

@@ -89,5 +89,6 @@ namespace SwFeatureDebug
         public List<LoubaoGroup> Loubaos = new List<LoubaoGroup>();
         public List<CollectorLayout> Collectors = new List<CollectorLayout>();
         public List<Busbar> Busbars = new List<Busbar>();
+        public List<FastenerJointPlan> FastenerJoints = new List<FastenerJointPlan>();
     }
 }

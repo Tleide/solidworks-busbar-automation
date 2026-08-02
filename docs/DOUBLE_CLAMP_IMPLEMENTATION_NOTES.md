@@ -259,3 +259,91 @@ TopToDown.exe --only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_
 - 上排下表面与汇流排上表面在 `Y = 474mm` 贴合。
 - 外侧上排的斜段没有改变双排夹接的最终高度关系。
 - 汇流排、下排、上排的搭接直双孔均成功创建并按对应实体厚度贯穿。
+
+## 12. 按漏保额定电流选型
+
+2026-07-15 起，ABC 分支排不再统一使用一个全局规格。程序从漏保组件名称中严格匹配已配置的额定电流标记，并为每台漏保保存独立的分支排规格和默认单双排拓扑：
+
+```text
+250A -> 4x20mm, Single
+400A -> 4x30mm, DoubleClamp
+630A -> 4x40mm, DoubleClamp
+```
+
+名称解析只匹配已配置规则的独立字段，例如 `PGM8LZ-400-1` 或 `PGM8LZ-400A-1` 中的 `400`/`400A`。型号中的 `8`、装配实例后缀 `-1` 等其他数字不会被当成额定电流。名称没有唯一匹配的规则时，规划会停止并报错。
+
+每台漏保的规格必须参与汇流排长度范围、搭接孔规划、双排高度、上排 Z 向错层和外侧避让路径。不能只在生成零件的最后一步替换宽厚值。
+
+当前测试装配中按 X 排序后的 A 相三台漏保为 `630A`、`400A`、`400A`。局部生成 A 汇流排和三对分支排后，实际输出为：
+
+```text
+Busbar_A_Branch_1_Lower / Upper: 4x40mm, DoubleClamp
+Busbar_A_Branch_2_Lower / Upper: 4x30mm, DoubleClamp
+Busbar_A_Branch_3_Lower / Upper: 4x30mm, DoubleClamp
+```
+
+该结果验证了同一汇流排下混合规格的分支排可以分别生成。`20mm` 宽度目前不在搭接孔矩阵的覆盖范围内；250A 单排会暂时使用中心孔兜底并输出日志，待补充 `20mm` 对应的搭接孔规则后再切换为正式孔型。
+
+N 排不复用 ABC 选型表，而是拥有独立 `NeutralBranchRules` 输入。当前 N 的 `250A/400A/630A` 规则分别为 `4x20/4x30/4x40`，默认全部单排；即使与 ABC 当前宽厚数值相同，后续也可单独调整，不会影响主相。
+
+2026-07-15 对当前测试装配的 N 排局部生成验证结果为：
+
+```text
+Busbar_N_Branch_1: 630A -> 4x40mm, Single
+Busbar_N_Branch_2: 400A -> 4x30mm, Single
+Busbar_N_Branch_3: 400A -> 4x30mm, Single
+```
+
+对应 N 汇流排 `5x50mm` 已按三台分支各自宽度计算长度，并生成 `40x50`、`30x50`、`30x50` 三组搭接直双孔。四件零件（N 汇流排加三根 N 分支排）的钣金和孔切除均已完成。
+
+## 13. 双排夹接生成前预检
+
+双排的高度和路径已经经过实体测量验证，但在每次生成前仍应检查规划结果是否继续满足这些公式。当前使用：
+
+```powershell
+TopToDown.exe --validate
+```
+
+该命令只扫描当前激活装配并输出报告，不删除 `Busbar_*`，不创建或重建任何铜排。对于每台配置为 `DoubleClamp` 的 ABC 分支，预检断言：
+
+```text
+lowerRouteEndY = collectorTopY - collectorThickness - branchThickness
+upperRouteEndY = collectorTopY
+upperStartZ - lowerStartZ = DoubleClampUpperStartZSign x branchThickness
+outer diagonal Z projection = -2 x branchThickness
+outer diagonal actual length >= DoubleClampOuterDiagonalMinimumLengthMm
+```
+
+这些是对已经生成的 `BusbarPlan` 输出做契约检查，并不是复制一套 `BusbarRoutePlanner`。它能及时发现配置、端口传递、选型、孔位同步或路径组装被改坏的情况；实体表面方向、孔是否真正贯穿和碰撞仍由生成后的 SolidWorks 边界框与局部三件装配检查确认。
+
+## 14. 自动实体复验基线
+
+2026-07-19 已实现并运行 `--verify-geometry`。该命令不重建铜排，而是读取当前装配中已存在的 `Busbar_*` 组件、装配坐标边界框和孔切除特征。正常生成完成后也会自动运行同一检查。
+
+当前样例包含三台漏保：`630A + 400A + 400A`。一次完整生成 28 根铜排后，实体校验结果为：
+
+```text
+errors=0, warnings=0
+```
+
+实际读取到的双排贴合面为：
+
+```text
+A: 下排/汇流排下表面 = 466mm，上排/汇流排上表面 = 474mm
+B: 下排/汇流排下表面 = 406mm，上排/汇流排上表面 = 414mm
+C: 下排/汇流排下表面 = 346mm，上排/汇流排上表面 = 354mm
+```
+
+同时验证了：ABC 汇流排实际为 `8x60mm`、N 汇流排实际为 `5x50mm`；`4x40mm` 与 `4x30mm` 分支排的实际 X 向宽度正确；所有 `HoleCut_P*` 特征存在，且切除深度分别等于对应材料厚度 `4/5/6/8mm`。
+
+## 15. 搭接螺栓夹紧层
+
+双排夹接的标准件长度计算必须把三层铜排实体作为一个夹紧层：
+
+```text
+下分支排 + 汇流排 + 上分支排
+```
+
+不能分别按“下排 + 汇流排”和“上排 + 汇流排”选择两套独立螺栓，否则会低估双排夹接所需的螺栓长度。
+
+当前最小螺纹露出量为固定 `3mm`，不按螺纹扣数计算。实际标准长度选定后，程序使用实际剩余长度参与后续电气间隙计算；`3mm` 只是最低通过条件，不是最终投影量。

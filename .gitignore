@@ -32,6 +32,9 @@ SWtopToDown/Busbar_*.sldprt
 !SWtopToDown/Busbar_Skeleton.SLDPRT
 !SWtopToDown/Busbar_Skeleton.sldprt
 
+# Generated production reports
+SWtopToDown/Reports/
+
 # OS files
 Thumbs.db
 Desktop.ini

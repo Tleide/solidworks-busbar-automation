@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace SwFeatureDebug
 {
@@ -14,8 +15,10 @@ namespace SwFeatureDebug
         public double NeutralCollectorThicknessMm;
         public double NeutralBranchWidthMm;
         public double NeutralBranchThicknessMm;
-        public BranchArrangement PhaseBranchArrangement;
-        public BranchArrangement NeutralBranchArrangement;
+        public List<BranchBusbarRule> PhaseBranchRules = new List<BranchBusbarRule>();
+        public List<BranchBusbarRule> NeutralBranchRules = new List<BranchBusbarRule>();
+        public BranchArrangement? PhaseBranchArrangementOverride;
+        public BranchArrangement? NeutralBranchArrangementOverride;
         public int DoubleClampUpperStartZSign;
         public double DoubleClampOuterInitialRiseMm;
         public double DoubleClampOuterDiagonalMinimumLengthMm;
@@ -32,6 +35,8 @@ namespace SwFeatureDebug
         public SheetMetalWidthSide CollectorSheetMetalWidthSide;
         public SheetMetalWidthSide BranchSheetMetalWidthSide;
         public double MainCollectorFrontClearanceMm;
+        public double MinimumThreadProjectionMm;
+        public List<FastenerSpec> FastenerCatalog = new List<FastenerSpec>();
 
         public BusbarProfile MainFeedProfile { get { return new BusbarProfile(MainFeedWidthMm, MainFeedThicknessMm); } }
         public BusbarProfile CollectorProfile { get { return new BusbarProfile(CollectorWidthMm, CollectorThicknessMm); } }

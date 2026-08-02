@@ -24,10 +24,26 @@ namespace SwFeatureDebug
 
         public CollectorLayout CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs, BusbarProfile branchProfile)
         {
+            List<BusbarProfile> branchProfiles = loubaoInputs
+                .Select(input => branchProfile)
+                .ToList();
+            return CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs, branchProfiles);
+        }
+
+        public CollectorLayout CreateLayout(
+            string phase,
+            int phaseIndex,
+            ConnectionPort fuseOut,
+            List<ConnectionPort> loubaoInputs,
+            List<BusbarProfile> branchProfiles)
+        {
+            if (loubaoInputs == null || branchProfiles == null || loubaoInputs.Count != branchProfiles.Count)
+                throw new Exception("Collector layout requires one branch profile for every loubao input.");
+
             double baseY = loubaoInputs.Max(p => p.HoleCenter.Y) + _settings.CollectorTopClearanceY;
             double collectorY = baseY - phaseIndex * _settings.CollectorPhaseSpacing;
             double collectorZ = loubaoInputs.Average(p => p.HoleCenter.Z) + _settings.CollectorOffsetFromLoubaoInZ;
-            CollectorLengthRange lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs, branchProfile));
+            CollectorLengthRange lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs, branchProfiles));
 
             return new CollectorLayout
             {
@@ -59,10 +75,12 @@ namespace SwFeatureDebug
             return tap;
         }
 
-        private List<CollectorConnectionExtent> CreateConnectionExtents(ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs, BusbarProfile branchProfile)
+        private List<CollectorConnectionExtent> CreateConnectionExtents(
+            ConnectionPort fuseOut,
+            List<ConnectionPort> loubaoInputs,
+            List<BusbarProfile> branchProfiles)
         {
             List<CollectorConnectionExtent> extents = new List<CollectorConnectionExtent>();
-            BusbarProfile inputProfile = branchProfile ?? _settings.BranchProfile;
 
             if (fuseOut != null)
             {
@@ -76,8 +94,10 @@ namespace SwFeatureDebug
 
             if (loubaoInputs != null)
             {
-                foreach (ConnectionPort loubaoInput in loubaoInputs)
+                for (int i = 0; i < loubaoInputs.Count; i++)
                 {
+                    ConnectionPort loubaoInput = loubaoInputs[i];
+                    BusbarProfile inputProfile = branchProfiles[i] ?? _settings.BranchProfile;
                     extents.Add(new CollectorConnectionExtent
                     {
                         Name = loubaoInput.Name,

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace SwFeatureDebug
 {
@@ -22,7 +23,7 @@ namespace SwFeatureDebug
             BusbarOverlapHolePlanner overlapHolePlanner = new BusbarOverlapHolePlanner();
 
             string fuseComponent = FindFuseComponent(foundPoints, phaseNames);
-            List<LoubaoGroup> loubaos = FindLoubaoGroups(foundPoints, phaseNames, fuseComponent);
+            List<LoubaoGroup> loubaos = FindLoubaoGroups(foundPoints, phaseNames, fuseComponent, settings);
 
             if (loubaos.Count == 0)
                 throw new Exception("No loubao components were found for planning.");
@@ -46,7 +47,10 @@ namespace SwFeatureDebug
                     .ToList();
                 ApplyBranchDevicePortRules(loubaoInputs, rules);
 
-                CollectorLayout collector = collectorPlanner.CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs);
+                List<BusbarProfile> branchProfiles = loubaoInputs
+                    .Select(input => FindLoubaoGroup(loubaos, input.ComponentName).BranchProfile)
+                    .ToList();
+                CollectorLayout collector = collectorPlanner.CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs, branchProfiles);
                 plan.Collectors.Add(collector);
 
                 ConnectionPort mainTap = collectorPlanner.CreateTap(
@@ -87,9 +91,10 @@ namespace SwFeatureDebug
                         i + 1,
                         loubaoInputs[i],
                         collector,
-                        settings.BranchProfile,
+                        branchProfiles[i],
                         settings.CollectorProfile,
-                        settings.PhaseBranchArrangement,
+                        settings.PhaseBranchArrangementOverride ??
+                            FindLoubaoGroup(loubaos, loubaoInputs[i].ComponentName).BranchArrangement,
                         false);
                 }
                 plan.Busbars.Add(CreateCollectorBusbar(
@@ -113,6 +118,8 @@ namespace SwFeatureDebug
                 topology,
                 rules,
                 settings);
+
+            FastenerPlanBuilder.BuildCollectorJoints(plan, settings);
 
             return plan;
         }
@@ -146,7 +153,9 @@ namespace SwFeatureDebug
                 neutralPhaseIndex,
                 null,
                 neutralInputs,
-                settings.NeutralBranchProfile);
+                neutralInputs
+                    .Select(input => FindLoubaoGroup(loubaos, input.ComponentName).NeutralBranchProfile)
+                    .ToList());
             plan.Collectors.Add(neutralCollector);
 
             for (int i = 0; i < neutralInputs.Count; i++)
@@ -164,9 +173,10 @@ namespace SwFeatureDebug
                     i + 1,
                     neutralInputs[i],
                     neutralCollector,
-                    settings.NeutralBranchProfile,
+                    FindLoubaoGroup(loubaos, neutralInputs[i].ComponentName).NeutralBranchProfile,
                     settings.NeutralCollectorProfile,
-                    settings.NeutralBranchArrangement,
+                    settings.NeutralBranchArrangementOverride ??
+                        FindLoubaoGroup(loubaos, neutralInputs[i].ComponentName).NeutralBranchArrangement,
                     true);
             }
             plan.Busbars.Add(CreateCollectorBusbar(
@@ -370,6 +380,8 @@ namespace SwFeatureDebug
                 rules,
                 routePlanner,
                 topology,
+                // The lower route-end formula already includes the different-side thickness compensation.
+                // Keep this leg as Single so ContactTopologyResolver does not add the same compensation again.
                 BranchLegRole.Single);
             ApplyCollectorOverlapHoleRules(lowerBranch, lowerTap, collector, collectorProfile, overlapHolePlanner, true);
             plan.Busbars.Add(lowerBranch);
@@ -572,20 +584,104 @@ namespace SwFeatureDebug
             return fuse.ComponentName;
         }
 
-        private static List<LoubaoGroup> FindLoubaoGroups(List<FoundPoint> foundPoints, string[] phaseNames, string fuseComponent)
+        private static List<LoubaoGroup> FindLoubaoGroups(
+            List<FoundPoint> foundPoints,
+            string[] phaseNames,
+            string fuseComponent,
+            BusbarSettings settings)
         {
             return foundPoints
                 .GroupBy(p => p.ComponentName)
                 .Where(g => !SameText(g.Key, fuseComponent))
                 .Where(g => phaseNames.All(phase => g.Any(p => SameText(p.PointName, phase + "_IN"))))
                 .Where(g => ScoreNameHint(g.Key, FuseComponentNameHints) <= ScoreNameHint(g.Key, LoubaoComponentNameHints))
-                .Select(g => new LoubaoGroup
-                {
-                    ComponentName = g.Key,
-                    CenterX = g.Where(p => p.PointName.EndsWith("_IN", StringComparison.OrdinalIgnoreCase)).Average(p => p.Position.X)
-                })
+                .Select(group => CreateLoubaoGroup(
+                    group,
+                    settings.PhaseBranchRules,
+                    settings.NeutralBranchRules))
                 .OrderBy(g => g.CenterX)
                 .ToList();
+        }
+
+        private static LoubaoGroup CreateLoubaoGroup(
+            IGrouping<string, FoundPoint> componentPoints,
+            List<BranchBusbarRule> phaseRules,
+            List<BranchBusbarRule> neutralRules)
+        {
+            BranchBusbarRule phaseRule = ResolveBranchRule(
+                componentPoints.Key,
+                phaseRules,
+                "phase branch");
+            BranchBusbarRule neutralRule = ResolveBranchRule(
+                componentPoints.Key,
+                neutralRules,
+                "neutral branch");
+            return new LoubaoGroup
+            {
+                ComponentName = componentPoints.Key,
+                CenterX = componentPoints
+                    .Where(point => point.PointName.EndsWith("_IN", StringComparison.OrdinalIgnoreCase))
+                    .Average(point => point.Position.X),
+                RatedCurrentA = phaseRule.RatedCurrentA,
+                BranchProfile = phaseRule.Profile,
+                BranchArrangement = phaseRule.Arrangement,
+                NeutralBranchProfile = neutralRule.Profile,
+                NeutralBranchArrangement = neutralRule.Arrangement
+            };
+        }
+
+        private static LoubaoGroup FindLoubaoGroup(List<LoubaoGroup> loubaos, string componentName)
+        {
+            LoubaoGroup loubao = loubaos.FirstOrDefault(group => SameText(group.ComponentName, componentName));
+            if (loubao == null)
+                throw new Exception("No loubao selection rule was found for component: " + componentName);
+
+            return loubao;
+        }
+
+        private static BranchBusbarRule ResolveBranchRule(
+            string componentName,
+            List<BranchBusbarRule> rules,
+            string ruleSetName)
+        {
+            int ratedCurrentA = ParseRatedCurrentA(componentName, rules);
+            BranchBusbarRule rule = rules.FirstOrDefault(candidate => candidate.RatedCurrentA == ratedCurrentA);
+            if (rule == null || rule.Profile == null)
+                throw new Exception("No " + ruleSetName + " busbar rule was found for " + ratedCurrentA + "A: " + componentName);
+
+            Console.WriteLine(
+                "Loubao " + ruleSetName + " rule [" + componentName + "]: " +
+                ratedCurrentA + "A => " + rule.Profile.Label + "mm, " + rule.Arrangement);
+            return rule;
+        }
+
+        private static int ParseRatedCurrentA(string componentName, List<BranchBusbarRule> rules)
+        {
+            if (string.IsNullOrWhiteSpace(componentName))
+                throw new Exception("Cannot parse rated current from an empty loubao component name.");
+
+            if (rules == null || rules.Count == 0)
+                throw new Exception("Branch busbar rules are not configured.");
+
+            List<int> matchedCurrents = rules
+                .Select(rule => rule.RatedCurrentA)
+                .Distinct()
+                .Where(current => Regex.IsMatch(
+                    componentName,
+                    @"(?<![A-Za-z0-9])" + current + @"(?:A)?(?![A-Za-z0-9])",
+                    RegexOptions.IgnoreCase))
+                .ToList();
+
+            if (matchedCurrents.Count != 1)
+            {
+                throw new Exception(
+                    "Loubao component name must contain exactly one configured rated-current token. " +
+                    "Component=" + componentName + ", supported=" +
+                    string.Join("A, ", rules.Select(rule => rule.RatedCurrentA).Distinct().OrderBy(current => current).ToArray()) +
+                    "A.");
+            }
+
+            return matchedCurrents[0];
         }
 
         private static FoundPoint FindRequiredPoint(List<FoundPoint> points, string componentName, string pointName)

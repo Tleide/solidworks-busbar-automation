@@ -1,14 +1,11 @@
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed partial class SolidWorksBusbarPartBuilder
     {
         private static string SaveBusbarSheetMetalPart(ModelDoc2 partModel, ModelDoc2 assemblyModel, Busbar busbar)
         {
@@ -17,7 +14,9 @@ namespace SwFeatureDebug
                 ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
                 : Path.GetDirectoryName(assemblyPath);
 
-            string savePath = Path.Combine(folder, busbar.Name + "_SheetMetal_" + busbar.Profile.Label + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
+            string savePath = BuildUniquePartPath(
+                folder,
+                busbar.Name + "_SheetMetal_" + busbar.Profile.Label);
 
             int errors = 0;
             int warnings = 0;
@@ -43,7 +42,7 @@ namespace SwFeatureDebug
                 ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
                 : Path.GetDirectoryName(assemblyPath);
 
-            string savePath = Path.Combine(folder, baseName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".SLDPRT");
+            string savePath = BuildUniquePartPath(folder, baseName);
 
             int errors = 0;
             int warnings = 0;
@@ -62,27 +61,63 @@ namespace SwFeatureDebug
             return savePath;
         }
 
-        private static void InsertPartIntoAssembly(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, string partPath, string componentName)
+        private static string BuildUniquePartPath(string folder, string baseName)
         {
-            ActivateDocument(swApp, assemblyModel);
+            string timestampedName = baseName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            string path = Path.Combine(folder, timestampedName + ".SLDPRT");
+            int suffix = 2;
+
+            while (File.Exists(path))
+            {
+                path = Path.Combine(folder, timestampedName + "_" + suffix + ".SLDPRT");
+                suffix++;
+            }
+
+            return path;
+        }
+
+        private static Component2 InsertPartIntoAssembly(
+            SldWorks swApp,
+            ModelDoc2 assemblyModel,
+            AssemblyDoc assembly,
+            string partPath,
+            string componentName)
+        {
+            SolidWorksSession.ActivateDocument(swApp, assemblyModel);
 
             Component2 component = assembly.AddComponent5(partPath, 0, "", false, "", 0, 0, 0);
             if (component == null)
-                throw new Exception("Failed to insert generated part into assembly.");
+                throw new Exception("Failed to insert generated part into assembly: " + partPath);
 
-            MathUtility utility = (MathUtility)swApp.GetMathUtility();
-            MathTransform identity = (MathTransform)utility.CreateTransform(new double[]
+            MathUtility utility = null;
+            MathTransform identity = null;
+            try
             {
-                1, 0, 0,
-                0, 1, 0,
-                0, 0, 1,
-                0, 0, 0,
-                1, 0, 0, 0
-            });
+                utility = (MathUtility)swApp.GetMathUtility();
+                if (utility == null)
+                    throw new Exception("Failed to access the SolidWorks math utility.");
 
-            component.Transform2 = identity;
-            component.Name2 = componentName;
-            assemblyModel.EditRebuild3();
+                identity = (MathTransform)utility.CreateTransform(new double[]
+                {
+                    1, 0, 0,
+                    0, 1, 0,
+                    0, 0, 1,
+                    0, 0, 0,
+                    1, 0, 0, 0
+                });
+
+                if (identity == null)
+                    throw new Exception("Failed to create the identity component transform.");
+
+                component.Transform2 = identity;
+                component.Name2 = componentName;
+                return component;
+            }
+            finally
+            {
+                SolidWorksCom.Release(identity);
+                SolidWorksCom.Release(utility);
+            }
         }
         private static void CloseBusbarPartDocument(SldWorks swApp, ModelDoc2 assemblyModel, ModelDoc2 partModel)
         {
@@ -93,9 +128,8 @@ namespace SwFeatureDebug
             if (string.IsNullOrWhiteSpace(partTitle))
                 return;
 
-            ActivateDocument(swApp, assemblyModel);
+            SolidWorksSession.ActivateDocument(swApp, assemblyModel);
             swApp.CloseDoc(partTitle);
-            ActivateDocument(swApp, assemblyModel);
         }
     }
 }

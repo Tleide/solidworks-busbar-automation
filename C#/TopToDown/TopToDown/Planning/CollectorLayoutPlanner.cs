@@ -14,20 +14,7 @@ namespace SwFeatureDebug
         {
             _rules = rules;
             _settings = settings;
-            _lengthController = new BusbarLengthController(settings);
-        }
-
-        public CollectorLayout CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs)
-        {
-            return CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs, _settings.BranchProfile);
-        }
-
-        public CollectorLayout CreateLayout(string phase, int phaseIndex, ConnectionPort fuseOut, List<ConnectionPort> loubaoInputs, BusbarProfile branchProfile)
-        {
-            List<BusbarProfile> branchProfiles = loubaoInputs
-                .Select(input => branchProfile)
-                .ToList();
-            return CreateLayout(phase, phaseIndex, fuseOut, loubaoInputs, branchProfiles);
+            _lengthController = new BusbarLengthController();
         }
 
         public CollectorLayout CreateLayout(
@@ -40,10 +27,16 @@ namespace SwFeatureDebug
             if (loubaoInputs == null || branchProfiles == null || loubaoInputs.Count != branchProfiles.Count)
                 throw new Exception("Collector layout requires one branch profile for every loubao input.");
 
-            double baseY = loubaoInputs.Max(p => p.HoleCenter.Y) + _settings.CollectorTopClearanceY;
-            double collectorY = baseY - phaseIndex * _settings.CollectorPhaseSpacing;
-            double collectorZ = loubaoInputs.Average(p => p.HoleCenter.Z) + _settings.CollectorOffsetFromLoubaoInZ;
-            CollectorLengthRange lengthRange = _lengthController.Calculate(CreateConnectionExtents(fuseOut, loubaoInputs, branchProfiles));
+            if (branchProfiles.Any(profile => profile == null))
+                throw new Exception("Collector layout does not accept a missing branch profile.");
+
+            double baseY = loubaoInputs.Max(p => p.HoleCenter.Y) + _settings.CollectorTopClearanceYMeters;
+            double collectorY = baseY - phaseIndex * _settings.CollectorPhaseSpacingMeters;
+            double collectorZ = loubaoInputs.Average(p => p.HoleCenter.Z) + _settings.CollectorOffsetFromLoubaoInZMeters;
+            double negativeXExtend = _settings.GetCollectorNegativeXExtend(phase);
+            CollectorLengthRange lengthRange = _lengthController.Calculate(
+                CreateConnectionExtents(fuseOut, loubaoInputs, branchProfiles),
+                negativeXExtend);
 
             return new CollectorLayout
             {
@@ -88,7 +81,7 @@ namespace SwFeatureDebug
                 {
                     Name = fuseOut.Name,
                     CenterX = fuseOut.HoleCenter.X,
-                    HalfSpanX = _settings.MainFeedProfile.Width / 2.0
+                    HalfSpanX = _settings.MainFeedProfile.WidthMeters / 2.0
                 });
             }
 
@@ -97,12 +90,12 @@ namespace SwFeatureDebug
                 for (int i = 0; i < loubaoInputs.Count; i++)
                 {
                     ConnectionPort loubaoInput = loubaoInputs[i];
-                    BusbarProfile inputProfile = branchProfiles[i] ?? _settings.BranchProfile;
+                    BusbarProfile inputProfile = branchProfiles[i];
                     extents.Add(new CollectorConnectionExtent
                     {
                         Name = loubaoInput.Name,
                         CenterX = loubaoInput.HoleCenter.X,
-                        HalfSpanX = inputProfile.Width / 2.0
+                        HalfSpanX = inputProfile.WidthMeters / 2.0
                     });
                 }
             }
@@ -126,24 +119,20 @@ namespace SwFeatureDebug
 
     internal class BusbarLengthController
     {
-        private readonly BusbarSettings _settings;
-
-        public BusbarLengthController(BusbarSettings settings)
-        {
-            _settings = settings;
-        }
-
-        public CollectorLengthRange Calculate(List<CollectorConnectionExtent> connectionExtents)
+        public CollectorLengthRange Calculate(List<CollectorConnectionExtent> connectionExtents, double negativeXExtend)
         {
             if (connectionExtents == null || connectionExtents.Count == 0)
                 throw new Exception("Collector length calculation requires at least one connected busbar extent.");
+
+            if (negativeXExtend < 0.0)
+                throw new ArgumentOutOfRangeException("negativeXExtend", "Collector negative-X extension cannot be negative.");
 
             double positiveXLimit = connectionExtents.Max(e => e.CenterX + e.HalfSpanX);
             double negativeXLimit = connectionExtents.Min(e => e.CenterX - e.HalfSpanX);
 
             return new CollectorLengthRange
             {
-                StartX = negativeXLimit - _settings.CollectorNegativeXExtend,
+                StartX = negativeXLimit - negativeXExtend,
                 EndX = positiveXLimit
             };
         }

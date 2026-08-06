@@ -1,14 +1,10 @@
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed partial class SolidWorksBusbarPartBuilder
     {
         private static void CreateBusbarMountingHoles(SldWorks swApp, ModelDoc2 partModel, Busbar busbar)
         {
@@ -39,80 +35,111 @@ namespace SwFeatureDebug
                 ? GetCollectorHoleSketchPlane(busbar)
                 : GetBranchCollectorHoleSketchPlane(busbar, port) ?? GetHoleSketchPlane(port);
             Feature plane = CreateOffsetPlane(partModel, holePlane.BasePlaneRole, holePlane.Offset);
-            partModel.EditRebuild3();
-
-            partModel.ClearSelection2(true);
-            if (!plane.Select2(false, 0))
-                throw new Exception("Failed to select hole sketch plane: " + busbar.Name + " " + role);
-
-            SketchManager sketchManager = partModel.SketchManager;
-            partModel.InsertSketch2(true);
-
-            bool sketchStillOpen = true;
-
             try
             {
-                Sketch activeSketch = sketchManager.ActiveSketch as Sketch;
-                if (activeSketch == null)
-                    activeSketch = partModel.GetActiveSketch2() as Sketch;
-
-                if (activeSketch == null)
-                    throw new Exception("Failed to get active hole sketch: " + busbar.Name + " " + role);
-
-                MathTransform modelToSketch = activeSketch.ModelToSketchTransform;
-                if (modelToSketch == null)
-                    throw new Exception("Failed to get hole sketch transform: " + busbar.Name + " " + role);
-
-                bool useDerivedTopPlane = busbar.Kind == BusbarKind.Collector ||
-                    (busbar.Kind == BusbarKind.Branch && port.Kind == PortKind.CollectorTap);
-                Point3 holeCenter = useDerivedTopPlane
-                    ? new Point3(port.HoleCenter.X, holePlane.Offset, port.HoleCenter.Z)
-                    : port.HoleCenter;
-                Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(swApp, holeCenter, modelToSketch));
-                double radius = Mm(port.HoleDiameterMm) / 2.0;
-                SketchSegment circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
-                if (circle == null)
-                    throw new Exception("Failed to create mounting hole circle: " + busbar.Name + " " + role);
-
-                ConnectionPort cutPort = busbar.Kind == BusbarKind.Collector
-                    ? CreateCollectorSurfaceCutPort(port, holePlane.Offset)
-                    : CreateBranchCollectorSurfaceCutPort(busbar, port, holePlane.Offset) ?? port;
-                Feature activeSketchCut = CreateDirectedBlindCutFromActiveSketch(
-                    partModel,
-                    busbar.Name + "_HoleCut_" + role,
-                    cutPort,
-                    busbar.Profile.Thickness);
-
-                if (activeSketchCut != null)
-                {
-                    sketchStillOpen = false;
-                    return;
-                }
+                SketchManager sketchManager = partModel.SketchManager;
+                partModel.EditRebuild3();
+                partModel.ClearSelection2(true);
+                if (!plane.Select2(false, 0))
+                    throw new Exception("Failed to select hole sketch plane: " + busbar.Name + " " + role);
 
                 partModel.InsertSketch2(true);
-                sketchStillOpen = false;
+
+                bool sketchStillOpen = true;
+                MathUtility mathUtility = null;
+                Sketch activeSketch = null;
+                MathTransform modelToSketch = null;
+
+                try
+                {
+                    mathUtility = (MathUtility)swApp.GetMathUtility();
+                    if (mathUtility == null)
+                        throw new Exception("Failed to access the SolidWorks math utility.");
+
+                    activeSketch = sketchManager.ActiveSketch as Sketch;
+                    if (activeSketch == null)
+                        activeSketch = partModel.GetActiveSketch2() as Sketch;
+
+                    if (activeSketch == null)
+                        throw new Exception("Failed to get active hole sketch: " + busbar.Name + " " + role);
+
+                    modelToSketch = activeSketch.ModelToSketchTransform;
+                    if (modelToSketch == null)
+                        throw new Exception("Failed to get hole sketch transform: " + busbar.Name + " " + role);
+
+                    bool useDerivedTopPlane = busbar.Kind == BusbarKind.Collector ||
+                        (busbar.Kind == BusbarKind.Branch && port.Kind == PortKind.CollectorTap);
+                    Point3 holeCenter = useDerivedTopPlane
+                        ? new Point3(port.HoleCenter.X, holePlane.Offset, port.HoleCenter.Z)
+                        : port.HoleCenter;
+                    Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(mathUtility, holeCenter, modelToSketch));
+                    double radius = Mm(port.HoleDiameterMm) / 2.0;
+                    SketchSegment circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
+                    if (circle == null)
+                        throw new Exception("Failed to create mounting hole circle: " + busbar.Name + " " + role);
+                    SolidWorksCom.Release(circle);
+
+                    ConnectionPort cutPort = busbar.Kind == BusbarKind.Collector
+                        ? CreateCollectorSurfaceCutPort(port, holePlane.Offset)
+                        : CreateBranchCollectorSurfaceCutPort(busbar, port, holePlane.Offset) ?? port;
+                    Feature activeSketchCut = CreateDirectedBlindCutFromActiveSketch(
+                        partModel,
+                        busbar.Name + "_HoleCut_" + role,
+                        cutPort,
+                        busbar.Profile.ThicknessMeters);
+
+                    if (activeSketchCut != null)
+                    {
+                        SolidWorksCom.Release(activeSketchCut);
+                        sketchStillOpen = false;
+                        return;
+                    }
+
+                    partModel.InsertSketch2(true);
+                    sketchStillOpen = false;
+                }
+                finally
+                {
+                    if (sketchStillOpen)
+                        partModel.InsertSketch2(true);
+
+                    SolidWorksCom.Release(modelToSketch);
+                    SolidWorksCom.Release(activeSketch);
+                    SolidWorksCom.Release(mathUtility);
+                }
+
+                Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
+                if (sketch == null)
+                    throw new Exception("hole sketch was created but could not be located: " + busbar.Name + " " + role);
+
+                try
+                {
+                    sketch.Name = busbar.Name + "_Hole_" + role;
+                    partModel.EditRebuild3();
+
+                    ConnectionPort cutPort = busbar.Kind == BusbarKind.Collector
+                        ? CreateCollectorSurfaceCutPort(port, holePlane.Offset)
+                        : CreateBranchCollectorSurfaceCutPort(busbar, port, holePlane.Offset) ?? port;
+                    Feature cut = CreateDirectedBlindCutFromSketch(
+                        partModel,
+                        sketch,
+                        busbar.Name + "_HoleCut_" + role,
+                        cutPort,
+                        busbar.Profile.ThicknessMeters);
+                    if (cut == null)
+                        throw new Exception("Failed to create mounting hole cut: " + busbar.Name + " " + role);
+
+                    SolidWorksCom.Release(cut);
+                }
+                finally
+                {
+                    SolidWorksCom.Release(sketch);
+                }
             }
             finally
             {
-                if (sketchStillOpen)
-                    partModel.InsertSketch2(true);
+                SolidWorksCom.Release(plane);
             }
-
-            Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
-            if (sketch == null)
-                throw new Exception("hole sketch was created but could not be located: " + busbar.Name + " " + role);
-
-            sketch.Name = busbar.Name + "_Hole_" + role;
-            partModel.EditRebuild3();
-
-            Feature cut = CreateDirectedBlindCutFromSketch(
-                partModel,
-                sketch,
-                busbar.Name + "_HoleCut_" + role,
-                port,
-                busbar.Profile.Thickness);
-            if (cut == null)
-                throw new Exception("Failed to create mounting hole cut: " + busbar.Name + " " + role);
         }
 
         // Branch overlap holes are derived from the actual sheet-metal path, not from the collector tap coordinate.
@@ -124,7 +151,7 @@ namespace SwFeatureDebug
 
             double routeEndY = busbar.SheetMetalSketchLine[busbar.SheetMetalSketchLine.Count - 1].Y;
             double surfaceY = port.RequiredFace == ContactFace.Lower
-                ? routeEndY + busbar.Profile.Thickness
+                ? routeEndY + busbar.Profile.ThicknessMeters
                 : routeEndY;
             return new SheetMetalOpenProfilePlane("Top", surfaceY, AxisDirection.X, AxisDirection.Z);
         }
@@ -193,6 +220,9 @@ namespace SwFeatureDebug
                 " mm, face=" + port.RequiredFace +
                 ", reverseDirection=" + reverseDirection);
 
+            if (!SelectSketchForCut(partModel, sketch))
+                throw new Exception("Failed to select cut sketch: " + featureName);
+
             Feature cut = TryCreateBlindCut(partModel, sketch, featureName, cutDepth, reverseDirection, false, "DirectedBlind");
             if (cut == null)
                 cut = TryCreateBlindCut(partModel, sketch, featureName, cutDepth, !reverseDirection, false, "DirectedBlindOpposite");
@@ -202,14 +232,6 @@ namespace SwFeatureDebug
                 cut = TryCreateBlindCutWithScope(partModel, sketch, featureName, cutDepth, reverseDirection, false, false, false, false, false, "DirectedBlindNoScope");
 
             return cut;
-        }
-
-        private static bool ShouldReverseHoleCutDirection(ConnectionPort port)
-        {
-            if (port.RequiredFace == ContactFace.Upper || port.RequiredFace == ContactFace.Left)
-                return true;
-
-            return false;
         }
 
         private static Feature TryCreateBlindCut(
@@ -288,6 +310,14 @@ namespace SwFeatureDebug
             cut.Name = featureName;
             Console.WriteLine("Created cut feature: " + featureName + ", mode=" + modeLabel);
             return cut;
+        }
+
+        private static bool ShouldReverseHoleCutDirection(ConnectionPort port)
+        {
+            if (port.RequiredFace == ContactFace.Upper || port.RequiredFace == ContactFace.Left)
+                return true;
+
+            return false;
         }
 
         private static Feature CreateDirectedBlindCutFromActiveSketch(ModelDoc2 partModel, string featureName, ConnectionPort port, double cutDepth)

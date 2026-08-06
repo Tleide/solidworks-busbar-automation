@@ -1,16 +1,13 @@
 using SolidWorks.Interop.sldworks;
-using SolidWorks.Interop.swconst;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed partial class SolidWorksBusbarPartBuilder
     {
-        private static void CreateBusbarPreviewPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarPlan plan)
+        public void CreateBusbarPreviewPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarPlan plan)
         {
             if (plan == null)
                 throw new Exception("Busbar preview plan is null.");
@@ -21,16 +18,26 @@ namespace SwFeatureDebug
             Console.WriteLine("Busbars: " + plan.Busbars.Count);
             Console.WriteLine("This preview creates sketch lines only. It does not create sheet metal solids.");
 
-            ModelDoc2 partModel = NewPartDocument(swApp);
-            ActivateDocument(swApp, partModel);
+            ModelDoc2 partModel = null;
+            string componentName;
+            try
+            {
+                partModel = NewPartDocument(swApp);
+                SolidWorksSession.ActivateDocument(swApp, partModel);
 
-            CreateBusbarPreviewSketches(partModel, plan);
-            partModel.EditRebuild3();
+                CreateBusbarPreviewSketches(partModel, plan);
+                partModel.EditRebuild3();
 
-            string savePath = SaveGeneratedPart(partModel, assemblyModel, "Busbar_Preview");
-            string componentName = Path.GetFileNameWithoutExtension(savePath);
-            InsertPartIntoAssembly(swApp, assemblyModel, assembly, savePath, componentName);
-            CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+                string savePath = SaveGeneratedPart(partModel, assemblyModel, "Busbar_Preview");
+                componentName = Path.GetFileNameWithoutExtension(savePath);
+                SolidWorksCom.Release(InsertPartIntoAssembly(swApp, assemblyModel, assembly, savePath, componentName));
+                assemblyModel.EditRebuild3();
+            }
+            finally
+            {
+                if (partModel != null)
+                    CloseBusbarPartDocument(swApp, assemblyModel, partModel);
+            }
 
             Console.WriteLine("Busbar preview part inserted: " + componentName);
             Console.WriteLine("Preview convention:");
@@ -74,10 +81,10 @@ namespace SwFeatureDebug
             }
         }
 
-        private static Feature CreatePreview3DPolylineSketch(ModelDoc2 partModel, string sketchName, List<Point3> points, bool constructionGeometry)
+        private static void CreatePreview3DPolylineSketch(ModelDoc2 partModel, string sketchName, List<Point3> points, bool constructionGeometry)
         {
             if (points == null || points.Count < 2)
-                return null;
+                return;
 
             partModel.ClearSelection2(true);
             SketchManager sketchManager = partModel.SketchManager;
@@ -100,8 +107,15 @@ namespace SwFeatureDebug
                         points[i + 1],
                         sketchName + " segment " + i);
 
-                    segment.ConstructionGeometry = constructionGeometry;
-                    segmentCount++;
+                    try
+                    {
+                        segment.ConstructionGeometry = constructionGeometry;
+                        segmentCount++;
+                    }
+                    finally
+                    {
+                        SolidWorksCom.Release(segment);
+                    }
                 }
             }
             finally
@@ -111,14 +125,20 @@ namespace SwFeatureDebug
             }
 
             if (segmentCount == 0)
-                return null;
+                return;
 
             Feature sketch = partModel.FeatureByPositionReverse(0) as Feature;
             if (sketch == null)
                 throw new Exception("Preview sketch was created but could not be located: " + sketchName);
 
-            sketch.Name = sketchName;
-            return sketch;
+            try
+            {
+                sketch.Name = sketchName;
+            }
+            finally
+            {
+                SolidWorksCom.Release(sketch);
+            }
         }
 
         private static string ToSafeFeatureName(string name)

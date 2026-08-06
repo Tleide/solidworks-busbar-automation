@@ -5,13 +5,19 @@ namespace SwFeatureDebug
 {
     internal static class BusbarOverlapRuleMatrix
     {
+        private const double WidthToleranceMm = 0.01;
         // Mirrored from the workbook overlap matrix. Keep the workbook as the human-editable source.
         private static readonly Dictionary<string, BusbarOverlapHoleRule> Rules = CreateRules();
 
         public static bool TryResolve(double firstWidthMm, double secondWidthMm, out BusbarOverlapHoleRule rule)
         {
-            int first = NormalizeWidth(firstWidthMm);
-            int second = NormalizeWidth(secondWidthMm);
+            int first;
+            int second;
+            if (!TryNormalizeWidth(firstWidthMm, out first) || !TryNormalizeWidth(secondWidthMm, out second))
+            {
+                rule = null;
+                return false;
+            }
             string key = MakeKey(first, second);
 
             BusbarOverlapHoleRule found;
@@ -77,9 +83,10 @@ namespace SwFeatureDebug
             return firstWidthMm.ToString() + "x" + secondWidthMm.ToString();
         }
 
-        private static int NormalizeWidth(double widthMm)
+        private static bool TryNormalizeWidth(double widthMm, out int normalizedWidthMm)
         {
-            return (int)Math.Round(widthMm, 0, MidpointRounding.AwayFromZero);
+            normalizedWidthMm = (int)Math.Round(widthMm, 0, MidpointRounding.AwayFromZero);
+            return Math.Abs(widthMm - normalizedWidthMm) <= WidthToleranceMm;
         }
     }
 }

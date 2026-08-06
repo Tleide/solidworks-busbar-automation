@@ -111,6 +111,7 @@ namespace SwFeatureDebug
             ValidateRuleTable(report, "Configuration/ABCBranchRules", settings.PhaseBranchRules);
             ValidateRuleTable(report, "Configuration/NBranchRules", settings.NeutralBranchRules);
             ValidateFastenerConfiguration(report, settings);
+            ValidateSheetMetalConfiguration(report, settings);
 
             if (!IsDefinedArrangement(settings.PhaseBranchArrangementOverride))
                 report.AddError("Configuration/ABCBranchRules", "The ABC arrangement override is invalid.");
@@ -124,13 +125,26 @@ namespace SwFeatureDebug
             if (settings.CollectorTopClearanceYMm <= 0.0)
                 report.AddError("Configuration/Collectors", "Collector top clearance must be greater than zero.");
 
-            if (settings.CollectorNegativeXExtendMm < 0.0)
-                report.AddError("Configuration/Collectors", "Collector negative-X extension cannot be negative.");
+            ValidateCollectorNegativeXExtension(report, "A", settings.CollectorANegativeXExtendMm);
+            ValidateCollectorNegativeXExtension(report, "B", settings.CollectorBNegativeXExtendMm);
+            ValidateCollectorNegativeXExtension(report, "C", settings.CollectorCNegativeXExtendMm);
+            ValidateCollectorNegativeXExtension(report, "N", settings.NeutralCollectorNegativeXExtendMm);
 
             if (!report.HasErrors)
                 report.AddInfo("Configuration", "Profiles, selection tables, and collector layout parameters are valid.");
 
             return report;
+        }
+
+        private static void ValidateCollectorNegativeXExtension(
+            BusbarPreflightReport report,
+            string phase,
+            double negativeXExtendMm)
+        {
+            if (negativeXExtendMm < 0.0)
+                report.AddError(
+                    "Configuration/Collectors/" + phase,
+                    phase + " collector negative-X extension cannot be negative.");
         }
 
         public static BusbarPreflightReport ValidatePlan(
@@ -282,6 +296,24 @@ namespace SwFeatureDebug
             }
         }
 
+        private static void ValidateSheetMetalConfiguration(
+            BusbarPreflightReport report,
+            BusbarSettings settings)
+        {
+            if (settings.SheetMetalBendRadiusMm <= 0.0)
+                report.AddError("Configuration/SheetMetal", "Bend radius must be greater than zero.");
+
+            if (settings.SheetMetalKFactor < 0.0 || settings.SheetMetalKFactor > 1.0)
+                report.AddError("Configuration/SheetMetal", "K factor must be between 0 and 1.");
+
+            if (!Enum.IsDefined(typeof(SheetMetalWidthSide), settings.MainFeedSheetMetalWidthSide) ||
+                !Enum.IsDefined(typeof(SheetMetalWidthSide), settings.CollectorSheetMetalWidthSide) ||
+                !Enum.IsDefined(typeof(SheetMetalWidthSide), settings.BranchSheetMetalWidthSide))
+            {
+                report.AddError("Configuration/SheetMetal", "Sheet-metal width side contains an invalid value.");
+            }
+        }
+
         private static bool IsDefinedArrangement(BranchArrangement? arrangement)
         {
             return !arrangement.HasValue || Enum.IsDefined(typeof(BranchArrangement), arrangement.Value);
@@ -406,7 +438,7 @@ namespace SwFeatureDebug
 
                 foreach (Busbar branch in GetPrimaryBranchesForPhase(plan, phase))
                 {
-                    double halfWidth = branch.Profile == null ? 0.0 : branch.Profile.Width / 2.0;
+                    double halfWidth = branch.Profile == null ? 0.0 : branch.Profile.WidthMeters / 2.0;
                     double leftEdge = branch.EndPort.HoleCenter.X - halfWidth;
                     double rightEdge = branch.EndPort.HoleCenter.X + halfWidth;
 
@@ -533,11 +565,11 @@ namespace SwFeatureDebug
                     string scope = "Overlap/" + branch.Name;
                     if (!BusbarOverlapRuleMatrix.TryResolve(branch.Profile.WidthMm, collector.Profile.WidthMm, out rule))
                     {
-                        report.AddWarning(
+                        report.AddError(
                             scope,
                             "No formal overlap matrix entry for " + branch.Profile.WidthMm.ToString("0.###") +
                             "x" + collector.Profile.WidthMm.ToString("0.###") +
-                            "mm; center-hole fallback is planned.");
+                            "mm; generation is blocked until an approved rule is added.");
                     }
                     else
                     {
@@ -600,7 +632,7 @@ namespace SwFeatureDebug
                     string scope = "DoubleClamp/" + phase + "/" + (index + 1);
                     ValidateProfileMatch(report, scope, lower.Profile, upper.Profile);
 
-                    double expectedLowerEndY = collector.Center.Y - settings.CollectorProfile.Thickness - lower.Profile.Thickness;
+                    double expectedLowerEndY = collector.Center.Y - settings.CollectorProfile.ThicknessMeters - lower.Profile.ThicknessMeters;
                     if (!SameCoordinate(lower.EndPort.HoleCenter.Y, expectedLowerEndY))
                     {
                         report.AddError(
@@ -624,7 +656,7 @@ namespace SwFeatureDebug
                         report.AddError(scope, "Upper and lower branch ends do not share the same collector tap X/Z position.");
                     }
 
-                    double expectedStartOffsetZ = settings.DoubleClampUpperStartZSign * upper.Profile.Thickness;
+                    double expectedStartOffsetZ = settings.DoubleClampUpperStartZSign * upper.Profile.ThicknessMeters;
                     double actualStartOffsetZ = upper.StartPort.HoleCenter.Z - lower.StartPort.HoleCenter.Z;
                     if (settings.DoubleClampUpperStartZSign != -1 && settings.DoubleClampUpperStartZSign != 1)
                         report.AddError(scope, "Double-clamp upper start Z sign must be -1 or 1.");
@@ -677,15 +709,15 @@ namespace SwFeatureDebug
                 report.AddError(scope, "Outer-avoidance logical route no longer starts and ends at its branch ports.");
 
             double initialRise = p1.Y - p0.Y;
-            if (!SameCoordinate(initialRise, settings.DoubleClampOuterInitialRise))
+            if (!SameCoordinate(initialRise, settings.DoubleClampOuterInitialRiseMeters))
                 report.AddError(scope, "Initial Y+ rise does not match DoubleClampOuterInitialRiseMm.");
 
-            double expectedDiagonalZ = -upper.Profile.Thickness * 2.0;
+            double expectedDiagonalZ = -upper.Profile.ThicknessMeters * 2.0;
             if (!SameCoordinate(p2.Z - p1.Z, expectedDiagonalZ) || p2.Y <= p1.Y)
                 report.AddError(scope, "Diagonal avoidance segment does not satisfy the required Y+ / Z- offset.");
 
             double diagonalLength = p1.DistanceTo(p2);
-            if (diagonalLength + Mm(CoordinateToleranceMm) < settings.DoubleClampOuterDiagonalMinimumLength)
+            if (diagonalLength + Mm(CoordinateToleranceMm) < settings.DoubleClampOuterDiagonalMinimumLengthMeters)
                 report.AddError(scope, "Diagonal avoidance segment is shorter than DoubleClampOuterDiagonalMinimumLengthMm.");
 
             if (!SameCoordinate(p3.Y, p4.Y) || !SameCoordinate(p3.Z, p2.Z) || p3.Y < p2.Y)

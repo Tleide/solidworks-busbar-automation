@@ -2,7 +2,7 @@ using System;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed partial class SolidWorksBusbarPartBuilder
     {
         private static bool SameText(string left, string right)
         {

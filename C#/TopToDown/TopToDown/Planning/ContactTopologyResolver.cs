@@ -12,11 +12,6 @@ namespace SwFeatureDebug
             return sketchLine;
         }
 
-        public bool IsSameSide(ConnectionPort start, ConnectionPort end)
-        {
-            return start.RequiredFace == end.RequiredFace;
-        }
-
         public ContactTopologyKind Resolve(Busbar busbar)
         {
             if (busbar == null || busbar.StartPort == null || busbar.EndPort == null)
@@ -60,6 +55,9 @@ namespace SwFeatureDebug
             if (busbar == null || sketchLine == null || sketchLine.Count < 2)
                 return;
 
+            if (busbar.Routing != null && busbar.Routing.TransitionPolicy == ThicknessTransitionPolicy.None)
+                return;
+
             ContactTopologyKind topology = ResolveForTransition(busbar);
             if (topology == ContactTopologyKind.SameSide)
                 return;
@@ -74,7 +72,7 @@ namespace SwFeatureDebug
 
             Point3 tangent = GetEndpointTangent(sketchLine, anchorIndex, compensateStart);
             Point3 normal = ChooseThicknessNormal(tangent, compensateStart ? busbar.StartPort.RequiredFace : busbar.EndPort.RequiredFace);
-            Point3 offset = Scale(normal, busbar.Profile.Thickness);
+            Point3 offset = Scale(normal, busbar.Profile.ThicknessMeters);
 
             if (offset.DistanceTo(new Point3(0, 0, 0)) <= Mm(0.001))
                 return;

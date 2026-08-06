@@ -23,14 +23,19 @@ namespace SwFeatureDebug
         public double NeutralBranchStartHoleDiameterMm;
         public double NeutralCollectorTapHoleDiameterMm;
 
-        public static ManualBusbarRuleSet CreateDefault(CabinetTopologyKind topologyKind)
+        public static ManualBusbarRuleSet CreateDefault(
+            CabinetTopologyKind topologyKind,
+            BusbarSettings settings)
         {
+            if (settings == null)
+                throw new ArgumentNullException("settings");
+
             return new ManualBusbarRuleSet
             {
                 TopologyKind = topologyKind,
                 DefaultEndMarginMm = 15.0,
-                BendRadiusMm = 5.0,
-                KFactor = 0.47,
+                BendRadiusMm = settings.SheetMetalBendRadiusMm,
+                KFactor = settings.SheetMetalKFactor,
                 WidthMode = BusbarWidthMode.MidPlane,
                 MainFeedCollectorFace = ContactFace.Upper,
                 BranchCollectorFace = ContactFace.Upper,

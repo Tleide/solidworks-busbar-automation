@@ -1,10 +1,20 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed class GenerationOptions
+    {
+        public bool ReplaceExistingBusbar = true;
+        public bool VerboseFeatureScan;
+        public bool PreviewOnly;
+        public bool ValidateOnly;
+        public bool VerifyGeometryOnly;
+        public bool ExportReportOnly;
+        public string[] OnlyBusbarNames;
+    }
+
+    internal static class Program
     {
         private static readonly BusbarSettings Settings = new BusbarSettings
         {
@@ -16,25 +26,15 @@ namespace SwFeatureDebug
             CollectorWidthMm = 60.0,
             CollectorThicknessMm = 8.0,
 
-            // ABC 分支排统一规格的历史兜底值。
-            // 当前正常流程按 PhaseBranchRules 为每台漏保选型，不需要修改这里。
-            BranchWidthMm = 30.0,
-            BranchThicknessMm = 4.0,
-
             // N 汇流排规格：宽度、厚度，单位 mm。
             NeutralCollectorWidthMm = 50.0,
             NeutralCollectorThicknessMm = 5.0,
-            // N 分支排统一规格的历史兜底值。
-            // 当前正常流程按 NeutralBranchRules 为每台漏保选型，不需要修改这里。
-            NeutralBranchWidthMm = 30.0,
-            NeutralBranchThicknessMm = 4.0,
-
             // ABC 分支排选型表。
             // BranchBusbarRule(漏保最大电流 A, 铜排宽度 mm, 铜排厚度 mm, 默认单排/双排)。
             // 漏保组件名称必须包含下列其中一个电流值，例如 PGM8LZ-400-1 或 PGM8LZ-400A-1。
             PhaseBranchRules = new List<BranchBusbarRule>
             {
-                new BranchBusbarRule(250, 20.0, 4.0, BranchArrangement.Single),
+                new BranchBusbarRule(250, 30.0, 4.0, BranchArrangement.Single),
                 new BranchBusbarRule(400, 30.0, 4.0, BranchArrangement.DoubleClamp),
                 new BranchBusbarRule(630, 40.0, 4.0, BranchArrangement.DoubleClamp)
             },
@@ -74,11 +74,17 @@ namespace SwFeatureDebug
             // 外侧上排 Y+/Z-斜向避让段的最小实际长度，单位 mm。
             DoubleClampOuterDiagonalMinimumLengthMm = 50.0,
 
-            // 汇流排布局参数：相间 Y 距离、相对最高漏保端子的 Y 净距、相对漏保的 Z 偏移、X-侧外伸，单位 mm。
+            // 汇流排布局参数：相间 Y 距离、相对最高漏保端子的 Y 净距、相对漏保的 Z 偏移，单位 mm。
             CollectorPhaseSpacingMm = 60.0,
             CollectorTopClearanceYMm = 240.0,
             CollectorOffsetFromLoubaoInZMm = 120.0,
-            CollectorNegativeXExtendMm = 50.0,
+            // 各相汇流排 X- 端在最左侧连接铜排边界外的额外外伸量，单位 mm。
+            // 修改其中一项只影响对应相别的汇流排长度，不会整体移动汇流排。
+            CollectorANegativeXExtendMm = 50.0,
+            CollectorBNegativeXExtendMm = 50.0,
+            CollectorCNegativeXExtendMm = 50.0,
+            // N 汇流排保留独立外伸量，避免 N 排跟随 ABC 任一相的参数变化。
+            NeutralCollectorNegativeXExtendMm = 50.0,
 
             // 主排从刀熔端起始引出的 Y 向长度，单位 mm。
             MainLeadOutYMm = 40.0,
@@ -94,85 +100,24 @@ namespace SwFeatureDebug
             MainCollectorFrontClearanceMm = 100
         };
 
-        private static readonly string[] PhaseNames = { "A", "B", "C" };
-        private const string NeutralConductorName = "N";
-
-        private static bool _replaceExistingBusbar = true;
-        private static bool _verboseFeatureScan;
-        private static bool _previewOnly;
-        private static bool _validateOnly;
-        private static bool _verifyGeometryOnly;
-        private static bool _exportReportOnly;
-        private static string[] _onlyBusbarNames;
-
         [STAThread]
-        private static void Main(string[] args)
+        private static int Main(string[] args)
         {
+            System.Environment.ExitCode = 0;
             try
             {
-                ConfigureFromArgs(args ?? new string[0]);
-                RunSolidWorksGeneration();
+                GenerationOptions options = GenerationOptionsParser.Parse(args);
+                new SolidWorksGenerationRunner(Settings, options).Run();
+                return System.Environment.ExitCode;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error: " + ex.Message);
-                Console.WriteLine();
-                Console.WriteLine(ex);
-                if (!Console.IsInputRedirected)
-                    Console.ReadKey();
+                Console.Error.WriteLine("Error: " + ex.Message);
+                Console.Error.WriteLine();
+                Console.Error.WriteLine(ex);
+                return 1;
             }
         }
 
-        private static void ConfigureFromArgs(string[] args)
-        {
-            foreach (string arg in args)
-            {
-                if (SameText(arg, "--verbose"))
-                {
-                    _verboseFeatureScan = true;
-                    continue;
-                }
-
-                if (SameText(arg, "--keep-existing"))
-                {
-                    _replaceExistingBusbar = false;
-                    continue;
-                }
-
-                if (SameText(arg, "--preview"))
-                {
-                    _previewOnly = true;
-                    continue;
-                }
-
-                if (SameText(arg, "--validate"))
-                {
-                    _validateOnly = true;
-                    continue;
-                }
-
-                if (SameText(arg, "--verify-geometry"))
-                {
-                    _verifyGeometryOnly = true;
-                    continue;
-                }
-
-                if (SameText(arg, "--export-report"))
-                {
-                    _exportReportOnly = true;
-                    continue;
-                }
-
-                const string onlyPrefix = "--only=";
-                if (arg != null && arg.StartsWith(onlyPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    _onlyBusbarNames = arg.Substring(onlyPrefix.Length)
-                        .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(name => name.Trim())
-                        .ToArray();
-                    continue;
-                }
-            }
-        }
     }
 }

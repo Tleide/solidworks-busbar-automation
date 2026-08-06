@@ -25,6 +25,7 @@ namespace SwFeatureDebug
 
     internal enum ThicknessTransitionPolicy
     {
+        None,
         PreferStartPort,
         PreferEndPort,
         Auto

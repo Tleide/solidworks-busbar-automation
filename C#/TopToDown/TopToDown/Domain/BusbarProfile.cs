@@ -13,9 +13,8 @@ namespace SwFeatureDebug
             ThicknessMm = thicknessMm;
         }
 
-        public double Width { get { return WidthMm / 1000.0; } }
-        public double Thickness { get { return ThicknessMm / 1000.0; } }
-        public double TerminalFaceOffset { get { return Thickness / 2.0; } }
+        public double WidthMeters { get { return WidthMm / 1000.0; } }
+        public double ThicknessMeters { get { return ThicknessMm / 1000.0; } }
         public string Label { get { return FormatMm(ThicknessMm) + "x" + FormatMm(WidthMm); } }
 
         private static string FormatMm(double value)

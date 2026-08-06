@@ -8,14 +8,28 @@ namespace SwFeatureDebug
         public double BendRadiusMm;
         public double KFactor;
         public BusbarWidthMode WidthMode;
+        public SheetMetalWidthSide WidthSide;
+        public bool ThickenDirection;
 
-        public static SheetMetalOptions FromRules(ManualBusbarRuleSet rules)
+        // This is the per-busbar manufacturing snapshot consumed by both CAD and reporting.
+        public static SheetMetalOptions FromRules(
+            ManualBusbarRuleSet rules,
+            BusbarSettings settings,
+            BusbarKind kind)
         {
+            if (rules == null)
+                throw new ArgumentNullException("rules");
+
+            if (settings == null)
+                throw new ArgumentNullException("settings");
+
             return new SheetMetalOptions
             {
                 BendRadiusMm = rules.BendRadiusMm,
                 KFactor = rules.KFactor,
-                WidthMode = rules.WidthMode
+                WidthMode = rules.WidthMode,
+                WidthSide = settings.GetSheetMetalWidthSide(kind),
+                ThickenDirection = settings.SheetMetalThickenDirection
             };
         }
     }

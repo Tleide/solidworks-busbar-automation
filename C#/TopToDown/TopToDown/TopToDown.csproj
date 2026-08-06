@@ -79,9 +79,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="App\ProgramUtilities.cs" />
-    <Compile Include="CadAbstractions\CadPartSpecs.cs" />
-    <Compile Include="CadAbstractions\ICadSheetMetalBuilder.cs" />
+    <Compile Include="App\GenerationOptionsParser.cs" />
     <Compile Include="Domain\BusbarGenerationSettings.cs" />
     <Compile Include="Domain\BranchBusbarRule.cs" />
     <Compile Include="Domain\BusbarHoleModels.cs" />
@@ -110,13 +108,16 @@
     <Compile Include="Rules\BusbarOverlapRuleMatrix.cs" />
     <Compile Include="SolidWorks\AssemblyScanner.cs" />
     <Compile Include="SolidWorks\BusbarBatchBuilder.cs" />
+    <Compile Include="SolidWorks\BusbarBuilderUtilities.cs" />
     <Compile Include="SolidWorks\BusbarGeometryVerifier.cs" />
     <Compile Include="SolidWorks\CadGeometryUtilities.cs" />
+    <Compile Include="SolidWorks\GeneratedComponentManager.cs" />
     <Compile Include="SolidWorks\MountingHoleBuilder.cs" />
     <Compile Include="SolidWorks\PartPersistenceService.cs" />
     <Compile Include="SolidWorks\PreviewBuilder.cs" />
     <Compile Include="SolidWorks\SheetMetalFeatureBuilder.cs" />
     <Compile Include="SolidWorks\SheetMetalSketchBuilder.cs" />
+    <Compile Include="SolidWorks\SolidWorksCom.cs" />
     <Compile Include="SolidWorks\SolidWorksGenerationRunner.cs" />
     <Compile Include="SolidWorks\SolidWorksSession.cs" />
   </ItemGroup>

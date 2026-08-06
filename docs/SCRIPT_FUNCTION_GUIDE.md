@@ -15,29 +15,33 @@
 
 ### `Program.cs`
 
-职责：应用入口、默认参数、命令行参数解析。
+职责：保存当前默认工程参数，并提供进程级异常边界。
 
 适合修改的场景：
 
-- 增加新的命令行参数。
 - 临时调整默认铜排规格、相间距、折弯半径等。
-- 以后接 UI 前，把这些默认参数迁到 `GenerationOptions`。
+- 以后接 UI 前，把这些默认参数迁到配置文件或 UI 输入模型。
 
 主要成员：
 
 | 名称 | 作用 |
 | --- | --- |
 | `Settings` | 当前默认生成参数，包括主排/汇流排/分支排规格、汇流排位置、折弯半径、K 因子等。 |
-| `PhaseNames` | 当前三相顺序，默认为 `A/B/C`。 |
-| `_replaceExistingBusbar` | 是否删除旧的 `Busbar_*` 组件。 |
-| `_verboseFeatureScan` | 是否输出详细特征扫描日志。 |
-| `_previewOnly` | 是否只生成预览骨架。 |
-| `Main(args)` | 程序入口，负责异常处理并调用 `RunSolidWorksGeneration()`。 |
-| `ConfigureFromArgs(args)` | 解析 `--verbose`、`--keep-existing`、`--preview`、`--validate`、`--verify-geometry`。 |
+| `GenerationOptions` | 一次运行的不可共享开关集合，由解析器创建后传给 Runner 和建模器，不再使用全局可变标志。 |
+| `Main(args)` | 解析命令行，创建 `SolidWorksGenerationRunner`，统一捕获未处理异常并返回进程退出码。 |
 
-### `App/ProgramUtilities.cs`
+### `App/GenerationOptionsParser.cs`
 
-职责：入口层通用小工具。
+职责：严格解析命令行参数，拒绝未知参数和互斥模式组合。新增命令行参数时改这里，并同步补充单元测试。
+
+| 函数 | 作用 |
+| --- | --- |
+| `Parse(args)` | 支持 `--verbose`、`--keep-existing`、`--preview`、`--validate`、`--verify-geometry`、`--export-report`、`--only=...`。 |
+| `IsOption(actual, expected)` | 忽略大小写比较无值开关。 |
+
+### `SolidWorks/BusbarBuilderUtilities.cs`
+
+职责：`SolidWorksBusbarPartBuilder` 各个 partial 文件共用的字符串比较和单位换算。
 
 | 函数 | 作用 |
 | --- | --- |
@@ -45,32 +49,7 @@
 | `Mm(value)` | 毫米转米。SolidWorks API 长度单位是米。 |
 | `ToMm(value)` | 米转毫米，主要用于日志显示。 |
 
-## 2. CAD 抽象层
-
-### `CadAbstractions/CadPartSpecs.cs`
-
-职责：定义 CAD 中立的钣金零件描述。当前只是接口雏形，主流程尚未使用。
-
-| 类 | 作用 |
-| --- | --- |
-| `SheetMetalPartSpec` | 描述一根待生成钣金铜排：零件名、种类、截面、折弯半径、K 因子、中心线、孔。 |
-| `HoleSpec` | 描述一个孔：名称、中心点、孔径、所在贴合面。 |
-
-适合后续修改的场景：
-
-- 想让 SolidWorks 和 UG 共用同一份“生成意图”。
-- 想从 `Busbar` 转换出 CAD 中立数据。
-- 想把 SolidWorks 层改成只消费 `SheetMetalPartSpec`。
-
-### `CadAbstractions/ICadSheetMetalBuilder.cs`
-
-职责：CAD 后端接口雏形。
-
-| 接口/函数 | 作用 |
-| --- | --- |
-| `ICadSheetMetalBuilder.CreateSheetMetalPart(spec)` | 未来由 SolidWorks、UG/NXOpen 等后端分别实现。 |
-
-## 3. 领域模型层
+## 2. 领域模型层
 
 这一层只表达业务对象，不应该出现 SolidWorks API。
 
@@ -82,7 +61,6 @@
 | --- | --- |
 | `MainFeedWidthMm / MainFeedThicknessMm` | 转接排规格。 |
 | `CollectorWidthMm / CollectorThicknessMm` | ABC 汇流排规格。 |
-| `BranchWidthMm / BranchThicknessMm` | ABC 分支排规格。 |
 | `PhaseBranchRules` | ABC 漏保额定电流到分支排规格和默认单双排的代码内规则表；当前覆盖 `250A/4x20/单排`、`400A/4x30/双排`、`630A/4x40/双排`。 |
 | `PhaseBranchArrangementOverride` | 项目级 ABC 拓扑覆盖。为 `null` 时使用每台漏保规则默认值；设置为单排或双排时统一覆盖拓扑。 |
 | `NeutralBranchRules` | N 排独立的额定电流到分支排规格和默认单双排规则表；当前为 `250A/4x20/单排`、`400A/4x30/单排`、`630A/4x40/单排`。 |
@@ -92,7 +70,8 @@
 | `CollectorPhaseSpacingMm` | 汇流排相间距。 |
 | `CollectorTopClearanceYMm` | 汇流排相对漏保上方净距。 |
 | `CollectorOffsetFromLoubaoInZMm` | 汇流排相对漏保的 Z 偏移。 |
-| `CollectorNegativeXExtendMm` | 汇流排 X- 侧外伸。 |
+| `CollectorANegativeXExtendMm / CollectorBNegativeXExtendMm / CollectorCNegativeXExtendMm` | A、B、C 汇流排各自的 X- 侧外伸；只延长对应汇流排的 X- 端。 |
+| `NeutralCollectorNegativeXExtendMm` | N 汇流排独立的 X- 侧外伸。 |
 | `MainLeadOutYMm` | 转接排从刀熔端初始 Y 方向引出距离。 |
 | `DoubleClampOuterInitialRiseMm` | 双排夹接 Z-方向外侧上排从漏保端先沿 Y+ 引出的距离，默认 `50mm`。 |
 | `DoubleClampOuterDiagonalMinimumLengthMm` | 外侧上排斜向避让段的最小实际长度，默认 `50mm`。 |
@@ -108,8 +87,8 @@
 
 | 类/函数 | 作用 |
 | --- | --- |
-| `SheetMetalOptions` | 钣金规则结果：折弯半径、K 因子、宽度模式。 |
-| `SheetMetalOptions.FromRules(rules)` | 从当前规则集生成钣金选项。 |
+| `SheetMetalOptions` | 单根铜排的钣金制造快照：折弯半径、K 因子、宽度模式、宽度生成侧和加厚方向。 |
+| `SheetMetalOptions.FromRules(rules, settings, kind)` | 在建立计划时，从已解析规则和项目配置生成快照；SolidWorks 与报表后续共同使用此对象。 |
 | `BusbarRoutingOptions` | 路径规则选项：轴顺序、厚度过渡策略和分支排路径模式。 |
 | `ConnectionPort` | 可连接铜排的工程端口，包含孔中心、贴合面、引出方向、端部裕度、孔径。 |
 | `ConnectionPort.ToString()` | 调试日志用，输出端口详细信息。 |
@@ -218,9 +197,9 @@
 
 | 成员/函数 | 作用 |
 | --- | --- |
-| `CreateDefault(topologyKind)` | 创建当前默认规则。 |
+| `CreateDefault(topologyKind, settings)` | 创建当前默认规则，并从项目配置读取折弯半径和 K 因子。 |
 | `DefaultEndMarginMm` | 默认端部裕度。 |
-| `BendRadiusMm / KFactor` | 默认钣金参数。 |
+| `BendRadiusMm / KFactor` | 已解析到本轮计划的钣金参数，随后被复制到每根铜排快照。 |
 | `MainFeedCollectorFace / BranchCollectorFace` | 转接排、分支排与汇流排的搭接面。 |
 | `MainFeedStartHoleDiameterMm` 等孔径字段 | 当前各类端口默认孔径。 |
 | `GetFuseOutFace()` | 根据拓扑返回刀熔出线端贴合面。 |
@@ -277,7 +256,7 @@
 | `CreateBusbar(...)` | 创建转接排或分支排，生成逻辑路径、草图线和打孔端口。 |
 | `AddMountingPortIfNeeded(...)` | 如果端口孔径有效，就加入铜排打孔列表。 |
 | `CloneConnectionPort(...)` | 克隆端口，避免后续修改原始端口影响打孔数据。 |
-| `FindFuseComponent(...)` | 从扫描点里识别刀熔组件。 |
+| `FindFuseComponent(...)` | 以“完整 A/B/C_OUT + 命中刀熔名称关键词且不命中漏保关键词”为契约；匹配不到或匹配多个都会报错，不按扫描顺序猜测。 |
 | `FindLoubaoGroups(...)` | 从扫描点里识别漏保组件并按 X 排序。 |
 | `ParseRatedCurrentA(...)` | 从漏保组件名称中严格匹配已配置的额定电流标记；无法唯一匹配时直接报错。 |
 | `ResolvePhaseBranchRule(...)` | 根据额定电流取得分支排规格和默认单双排规则。 |
@@ -342,7 +321,8 @@
 | `CreateSingle(...)` | 生成单孔，中心点不偏移，仅按规则设置孔径。 |
 | `CreateStraightDouble(...)` | 生成直双孔，沿窄排长度方向正负偏移，偏移量为宽排宽度的四分之一。 |
 | `CreateDiagonalDouble(...)` | 生成斜双孔，按矩阵规则在贴合面内两个局部轴上同时正负偏移。 |
-| `CreateFallbackPorts(...)` | 当宽度组合不在矩阵中时，保留中心孔兜底，避免当前 80mm 等旧规格直接中断生成。 |
+
+`CreateCollectorOverlapPorts(...)` 在矩阵未覆盖时直接抛出错误，不生成中心孔兜底。当前 `20mm` 分支排组合尚未获批，因此包含 250A 漏保的规划会被阻止。
 
 ### `Planning/BusbarPreflightValidator.cs`
 
@@ -420,7 +400,10 @@
 
 | 函数 | 作用 |
 | --- | --- |
-| `RunSolidWorksGeneration()` | 先校验配置，再连接 SW、扫描、生成计划和预检；只有预检通过后才会删除旧件并预览或生成实体。`--validate` 在预检报告后直接退出；`--verify-geometry` 只读取既有实体；正常实体生成完成后自动调用实体校验。 |
+| `SolidWorksGenerationRunner(...)` | 接收本轮 `BusbarSettings` 和 `GenerationOptions`，创建专属零件建模器。 |
+| `Run()` | 校验配置，连接 SW，调用扫描器，建立计划并预检，再分派预览、报表、既有实体校验或完整生成。正常生成不会预先删除旧件。 |
+| `VerifyExistingGeometry(...)` | 调用只读实体校验器，并在失败时设置非零进程退出码。 |
+| `ExportProductionReport(...)` | 将当前完整计划导出到装配体旁的 `Reports` 目录。 |
 
 ### `SolidWorks/BusbarGeometryVerifier.cs`
 
@@ -432,7 +415,8 @@
 | `FindGeneratedComponents(...)` | 查找装配中的 `Busbar_*` 组件，并兼容 SolidWorks 实例后缀与保存文件名后缀。 |
 | `GetAssemblyBounds(...)` | 用 `Component2.GetBox(false, false)` 获取装配坐标系下的真实实体边界框。 |
 | `ValidateProfileEnvelope(...)` | 检查主/分支排宽度、汇流排宽度和厚度是否符合计划规格。 |
-| `ValidateHoleFeatures(...)` | 检查每个预期 `HoleCut_P*` 特征和 `ExtrudeFeatureData2` 切除深度。 |
+| `ValidateHoleFeatures(...)` | 检查每个预期 `HoleCut_P*` 特征、声明切除深度和实际圆柱孔面。 |
+| `ValidatePhysicalThroughHole(...)` | 按计划孔中心、半径和轴向匹配实体圆柱面，并验证物理跨度覆盖完整铜排厚度。 |
 | `ValidateDoubleClampSurfaceContacts(...)` | 根据实体边界框验证上下分支排分别贴合汇流排下、上表面。 |
 
 ### `SolidWorks/SolidWorksSession.cs`
@@ -447,15 +431,17 @@
 
 ### `SolidWorks/AssemblyScanner.cs`
 
-职责：扫描参考点，删除旧铜排组件。
+职责：只扫描装配体与组件中的命名参考点，并将坐标转换到装配体坐标系。删除组件不属于扫描职责。
 
 | 函数 | 作用 |
 | --- | --- |
-| `ScanReferencePoints(...)` | 扫描装配体自身和各组件内部参考点。 |
-| `DeleteExistingBusbarComponents(...)` | 删除装配体中旧的 `Busbar_*` 组件。 |
-| `DumpModelFeatures(...)` | 遍历一个模型的 Feature 树。 |
-| `TryReadReferencePoint(...)` | 尝试把 Feature 当作 `RefPoint` 读取，并转换成 `FoundPoint`。 |
-| `TransformPoint(...)` | 将组件局部点转换到装配体坐标。 |
+| `AssemblyReferencePointScanner(verbose)` | 创建一次扫描操作所需的日志配置。 |
+| `Scan(...)` | 扫描装配体和组件参考点；每次扫描只创建一个 `MathUtility`，并输出模型扫描数、缓存命中数和耗时。 |
+| `ScanComponentReferencePoints(...)` | 跳过程序生成的 `Busbar_*` 组件，并按“零件文件路径 + 引用配置”缓存设备局部 `RefPoint`；同一零件的多个实例只扫描一次 Feature 树。 |
+| `ReadReferencePointTemplates(...)` | 只读取 `TypeName2 = RefPoint` 的 Feature，提取局部坐标模板并隔离单点读取异常。 |
+| `AddFoundPoints(...)` | 对每个组件实例套用装配变换，写入装配体坐标下的 `FoundPoint`。 |
+| `TransformPoint(...)` | 将组件局部点转换到装配体坐标，并释放本次转换创建的临时数学对象。 |
+| `SolidWorksCom.Release(...)` | 释放扫描过程中创建且不再保留的 COM 临时对象；不释放仍由后续流程使用的装配体对象。 |
 
 ### `SolidWorks/BusbarBatchBuilder.cs`
 
@@ -467,9 +453,18 @@
 | `FindRequiredBusbar(...)` | 查找必须存在的铜排，不存在时报错。 |
 | `FindBusbars(...)` | 按相位和类型查找铜排。 |
 | `FindOptionalBusbars(...)` | 查找可选铜排，例如 N 相。 |
-| `CreateBusbarSheetMetalParts(...)` | 批量生成铜排。 |
-| `CreateBusbarSheetMetalPart(...)` | 生成单根铜排：建新零件、建钣金、打孔、保存、插回装配体。 |
+| `CreateBusbarSheetMetalParts(...)` | 逐根生成并暂存插入，全部完成后执行实体校验；失败时清理本轮暂存项，通过后才交给组件管理器替换旧件。 |
+| `CreateBusbarSheetMetalPart(...)` | 生成单根铜排：建新零件、建钣金、打孔、保存，在零件文档仍打开时立即插入装配体，再在 `finally` 中关闭临时文档。这个顺序避免 `AddComponent5` 对刚关闭文件返回 `null`。 |
 | `CreateBusbarSheetMetalFeature(...)` | 创建单根铜排的钣金主体 Feature。 |
+
+### `SolidWorks/GeneratedComponentManager.cs`
+
+职责：集中管理生成组件的删除操作，使扫描器和建模器不再各自维护选择/删除逻辑。
+
+| 函数 | 作用 |
+| --- | --- |
+| `DeleteExistingBusbars(...)` | 完整生成时删除旧 `Busbar_*` 组件；局部 `--only` 生成时只删除同名旧组件，同时排除已经通过暂存校验的新组件，并验证是否仍有旧件残留。 |
+| `DeleteSelected(...)` | 在本轮生成失败时删除已插入的暂存组件。 |
 
 ### `SolidWorks/CadGeometryUtilities.cs`
 
@@ -482,8 +477,7 @@
 | `GetOpenProfilePlane(...)` | 根据铜排中心线判断开放轮廓草图应在哪个基准平面。 |
 | `AllSameCoordinate(...)` | 判断一组点是否在某个坐标轴上保持常量。 |
 | `GetCoordinate(...)` | 按轴读取点坐标。 |
-| `CreateOffsetPlane(...)` | 基于默认基准面创建偏移平面。 |
-| `FindLastFeatureByType(...)` | 查找最后一个指定类型 Feature。 |
+| `CreateOffsetPlane(...)` | 基于指定默认基准面创建偏移平面；创建或选择失败时直接报错，不回退到任意已有参考面。 |
 | `FindDefaultPlane(...)` | 查找默认 Top/Front/Right 平面。 |
 | `ModelPointToSketchPoint(...)` | 将模型坐标转换成草图坐标。 |
 | `FlattenSketchPoint(...)` | 把草图点压到 Z=0 的二维草图平面。 |
@@ -522,14 +516,15 @@
 | --- | --- |
 | `CreateBusbarMountingHoles(...)` | 遍历 `MountingPorts` 打孔；如果为空则回退起终端口。 |
 | `CreateBusbarMountingHole(...)` | 创建单个孔草图并切除。 |
-| `GetHoleSketchPlane(port)` | 根据端口贴合面选择孔草图平面。 |
-| `CreateDirectedBlindCutFromSketch(...)` | 从已存在草图创建定向盲切。 |
+| `GetCollectorHoleSketchPlane(...)` | 让汇流排所有孔型共用实际上表面作为草图面。 |
+| `GetBranchCollectorHoleSketchPlane(...)` | 从分支排实际钣金路径推导汇流排搭接端的实体表面。 |
+| `GetHoleSketchPlane(port)` | 对其他孔根据端口贴合面选择草图平面。 |
+| `CreateDirectedBlindCutFromActiveSketch(...)` | 优先从当前激活草图执行唯一方向、深度等于材料厚度的盲切。 |
+| `CreateDirectedBlindCutFromSketch(...)` | active sketch 入口失败时，改用已创建草图 Feature 执行相同参数的切除。 |
 | `ShouldReverseHoleCutDirection(port)` | 根据贴合面判断切除方向是否反向。 |
-| `TryCreateBlindCut(...)` | 标准盲切尝试。 |
-| `TryCreateBlindCutWithScope(...)` | 带 FeatureScope 参数的盲切尝试。 |
-| `CreateDirectedBlindCutFromActiveSketch(...)` | 优先从当前激活草图直接切除。 |
-| `TryCreateBlindCutFromCurrentSelection(...)` | 从当前选择集创建切除。 |
 | `SelectSketchForCut(...)` | 选择切除草图。 |
+
+两种入口只解决 SolidWorks 对 active sketch/feature selection 的差异，不允许改变切除方向、normal-cut 或 feature scope 来试错。
 
 ### `SolidWorks/PartPersistenceService.cs`
 
@@ -537,8 +532,9 @@
 
 | 函数 | 作用 |
 | --- | --- |
-| `SaveBusbarSheetMetalPart(...)` | 按铜排名称、规格、时间戳保存钣金零件。 |
-| `SaveGeneratedPart(...)` | 保存通用生成零件，预览等流程可用。 |
+| `SaveBusbarSheetMetalPart(...)` | 按铜排名称、规格和唯一时间戳保存钣金零件。 |
+| `SaveGeneratedPart(...)` | 以唯一文件名保存通用生成零件，预览等流程可用。 |
+| `BuildUniquePartPath(...)` | 使用毫秒时间戳和递增后缀避免同名文件被覆盖。 |
 | `InsertPartIntoAssembly(...)` | 将保存的零件插回装配体，并设置单位变换。 |
 | `CloseBusbarPartDocument(...)` | 保存并插入后关闭生成的零件文档。 |
 
@@ -599,4 +595,4 @@
 | 保存和插回装配体 | `SolidWorks/PartPersistenceService.cs` |
 | 接 Excel 数据层 | 后续新增 `Data/ExcelDataRepository.cs` |
 | 接 UI | 后续新增 `GenerationRequest` / `GenerationOptions`，UI 填请求对象 |
-| 支持 UG/NXOpen | 新增 CAD 后端，实现 `ICadSheetMetalBuilder` |
+| 支持 UG/NXOpen | 保持 `Domain/Rules/Planning` 不依赖 CAD；等第二后端真实接入时，从 `BusbarPlan` 提取两个后端共同需要的最小生成契约 |

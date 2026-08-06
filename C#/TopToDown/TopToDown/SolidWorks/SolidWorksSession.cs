@@ -1,16 +1,13 @@
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal static class SolidWorksSession
     {
-        private static ModelDoc2 GetActiveOrOpenAssembly(SldWorks swApp)
+        public static ModelDoc2 GetActiveOrOpenAssembly(SldWorks swApp)
         {
             ModelDoc2 model = swApp.ActiveDoc as ModelDoc2;
             if (model != null && model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
@@ -33,7 +30,7 @@ namespace SwFeatureDebug
 
             throw new Exception("Open SolidWorks and activate a target assembly first.");
         }
-        private static SldWorks GetOrStartSolidWorks()
+        public static SldWorks GetOrStartSolidWorks()
         {
             try
             {
@@ -53,10 +50,18 @@ namespace SwFeatureDebug
                 return swApp;
             }
         }
-        private static void ActivateDocument(SldWorks swApp, ModelDoc2 model)
+        public static void ActivateDocument(SldWorks swApp, ModelDoc2 model)
         {
+            if (swApp == null || model == null)
+                throw new ArgumentNullException(swApp == null ? "swApp" : "model");
+
             int errors = 0;
-            swApp.ActivateDoc3(model.GetTitle(), false, 0, ref errors);
+            ModelDoc2 activated = swApp.ActivateDoc3(model.GetTitle(), false, 0, ref errors) as ModelDoc2;
+            if (errors != 0 || activated == null)
+            {
+                throw new InvalidOperationException(
+                    "Failed to activate SolidWorks document '" + model.GetTitle() + "'. Error=" + errors + ".");
+            }
         }
     }
 }

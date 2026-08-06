@@ -3,12 +3,10 @@ using SolidWorks.Interop.swconst;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed partial class SolidWorksBusbarPartBuilder
     {
         private static SketchSegment CreateLineOrThrow(SketchManager sketchManager, Point3 a, Point3 b, string name)
         {
@@ -107,8 +105,8 @@ namespace SwFeatureDebug
 
             Console.WriteLine(
                 "Part bounding box [" + busbar.Name + "]: " +
-                "Ymin=" + box[1].ToString("F3") + " mm, " +
-                "Ymax=" + box[4].ToString("F3") + " mm");
+                "Ymin=" + ToMm(box[1]).ToString("F3") + " mm, " +
+                "Ymax=" + ToMm(box[4]).ToString("F3") + " mm");
         }
 
         private static Feature CreateOffsetPlane(ModelDoc2 partModel, string basePlaneRole, double offset)
@@ -117,17 +115,37 @@ namespace SwFeatureDebug
             if (basePlane == null)
                 throw new Exception("Default plane not found: " + basePlaneRole);
 
-            partModel.ClearSelection2(true);
-            basePlane.Select2(false, 0);
-
             double distance = Math.Abs(offset);
             bool flipDirection = offset < 0;
+            HashSet<string> existingPlaneNames = GetReferencePlaneNames(partModel);
 
-            partModel.ICreatePlaneAtOffset3(distance, flipDirection, true);
+            RefPlane createdPlane = null;
+            Feature plane;
+            try
+            {
+                partModel.ClearSelection2(true);
+                if (!basePlane.Select2(false, 0))
+                    throw new Exception("Failed to select default plane: " + basePlaneRole);
 
-            Feature plane = FindLastFeatureByType(partModel, "RefPlane");
-            if (plane == null)
-                throw new Exception("Failed to create offset plane: " + basePlaneRole);
+                createdPlane = partModel.ICreatePlaneAtOffset3(distance, flipDirection, true);
+                if (createdPlane == null)
+                    throw new Exception("Failed to create offset plane: " + basePlaneRole);
+
+                // ICreatePlaneAtOffset3 returns the plane definition, while the feature-tree
+                // wrapper is not exposed by this SolidWorks interop version. Find the new
+                // RefPlane by comparing names captured before creation.
+                plane = FindNewReferencePlane(partModel, existingPlaneNames);
+                if (plane == null || !SameText(plane.GetTypeName2(), "RefPlane"))
+                {
+                    SolidWorksCom.Release(plane);
+                    throw new Exception("SolidWorks did not return the newly created reference plane: " + basePlaneRole);
+                }
+            }
+            finally
+            {
+                SolidWorksCom.Release(createdPlane);
+                SolidWorksCom.Release(basePlane);
+            }
 
             Console.WriteLine(
                 "Created offset plane: role=" + basePlaneRole +
@@ -138,20 +156,64 @@ namespace SwFeatureDebug
             return plane;
         }
 
-        private static Feature FindLastFeatureByType(ModelDoc2 model, string typeName)
+        private static HashSet<string> GetReferencePlaneNames(ModelDoc2 partModel)
         {
-            Feature feature = model.FirstFeature() as Feature;
-            Feature lastMatch = null;
+            HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Feature feature = partModel.FirstFeature() as Feature;
 
             while (feature != null)
             {
-                if (SameText(feature.GetTypeName2(), typeName))
-                    lastMatch = feature;
+                Feature nextFeature = null;
+                try
+                {
+                    if (SameText(feature.GetTypeName2(), "RefPlane") &&
+                        !string.IsNullOrWhiteSpace(feature.Name))
+                    {
+                        names.Add(feature.Name);
+                    }
 
-                feature = feature.GetNextFeature() as Feature;
+                    nextFeature = feature.GetNextFeature() as Feature;
+                }
+                finally
+                {
+                    SolidWorksCom.Release(feature);
+                }
+
+                feature = nextFeature;
             }
 
-            return lastMatch;
+            return names;
+        }
+
+        private static Feature FindNewReferencePlane(ModelDoc2 partModel, ISet<string> existingPlaneNames)
+        {
+            Feature feature = partModel.FirstFeature() as Feature;
+
+            while (feature != null)
+            {
+                Feature nextFeature = null;
+                bool returnCurrent = false;
+                try
+                {
+                    if (SameText(feature.GetTypeName2(), "RefPlane") &&
+                        !existingPlaneNames.Contains(feature.Name))
+                    {
+                        returnCurrent = true;
+                        return feature;
+                    }
+
+                    nextFeature = feature.GetNextFeature() as Feature;
+                }
+                finally
+                {
+                    if (!returnCurrent)
+                        SolidWorksCom.Release(feature);
+                }
+
+                feature = nextFeature;
+            }
+
+            return null;
         }
 
         private static Feature FindDefaultPlane(ModelDoc2 partModel, string role)
@@ -180,36 +242,64 @@ namespace SwFeatureDebug
 
             while (feature != null)
             {
-                if (feature.GetTypeName2() == "RefPlane")
+                Feature nextFeature = null;
+                bool returnCurrent = false;
+                try
                 {
-                    foreach (string name in names)
+                    if (feature.GetTypeName2() == "RefPlane")
                     {
-                        if (SameText(feature.Name, name))
+                        foreach (string name in names)
+                        {
+                            if (!SameText(feature.Name, name))
+                                continue;
+
+                            returnCurrent = true;
                             return feature;
+                        }
+
+                        if (refPlaneIndex == fallbackIndex)
+                        {
+                            returnCurrent = true;
+                            return feature;
+                        }
+
+                        refPlaneIndex++;
                     }
 
-                    if (refPlaneIndex == fallbackIndex)
-                        return feature;
-
-                    refPlaneIndex++;
+                    nextFeature = feature.GetNextFeature() as Feature;
+                }
+                finally
+                {
+                    if (!returnCurrent)
+                        SolidWorksCom.Release(feature);
                 }
 
-                feature = feature.GetNextFeature() as Feature;
+                feature = nextFeature;
             }
 
             return null;
         }
-        private static Point3 ModelPointToSketchPoint(SldWorks swApp, Point3 modelPoint, MathTransform modelToSketch)
+        private static Point3 ModelPointToSketchPoint(MathUtility utility, Point3 modelPoint, MathTransform modelToSketch)
         {
-            MathUtility utility = (MathUtility)swApp.GetMathUtility();
-            MathPoint point = (MathPoint)utility.CreatePoint(new[] { modelPoint.X, modelPoint.Y, modelPoint.Z });
-            MathPoint sketchPoint = (MathPoint)point.MultiplyTransform(modelToSketch);
-            double[] data = sketchPoint.ArrayData as double[];
+            MathPoint point = null;
+            MathPoint sketchPoint = null;
+            try
+            {
+                point = (MathPoint)utility.CreatePoint(new[] { modelPoint.X, modelPoint.Y, modelPoint.Z });
+                sketchPoint = (MathPoint)point.MultiplyTransform(modelToSketch);
+                double[] data = sketchPoint.ArrayData as double[];
 
-            if (data == null || data.Length < 3)
-                throw new Exception("Failed to convert model point to sketch point.");
+                if (data == null || data.Length < 3)
+                    throw new Exception("Failed to convert model point to sketch point.");
 
-            return new Point3(data[0], data[1], data[2]);
+                return new Point3(data[0], data[1], data[2]);
+            }
+            finally
+            {
+                if (!object.ReferenceEquals(sketchPoint, point))
+                    SolidWorksCom.Release(sketchPoint);
+                SolidWorksCom.Release(point);
+            }
         }
 
         private static Point3 FlattenSketchPoint(Point3 point)
@@ -223,10 +313,25 @@ namespace SwFeatureDebug
 
             while (feature != null)
             {
-                if (SameText(feature.GetTypeName2(), typeName))
-                    return feature;
+                Feature nextFeature = null;
+                bool returnCurrent = false;
+                try
+                {
+                    if (SameText(feature.GetTypeName2(), typeName))
+                    {
+                        returnCurrent = true;
+                        return feature;
+                    }
 
-                feature = feature.GetNextFeature() as Feature;
+                    nextFeature = feature.GetNextFeature() as Feature;
+                }
+                finally
+                {
+                    if (!returnCurrent)
+                        SolidWorksCom.Release(feature);
+                }
+
+                feature = nextFeature;
             }
 
             return null;

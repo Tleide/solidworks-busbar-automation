@@ -20,10 +20,8 @@ namespace SwFeatureDebug
                 .SelectMany(busbar => CreateCollectorHoleConnections(busbar, settings))
                 .ToList();
 
-            foreach (IGrouping<string, CollectorHoleConnection> group in connections.GroupBy(connection =>
-                connection.Phase + "|" +
-                ToMm(connection.Port.HoleCenter.X).ToString("0.###") + "|" +
-                ToMm(connection.Port.HoleCenter.Z).ToString("0.###")))
+            foreach (IGrouping<CollectorHoleConnection, CollectorHoleConnection> group in
+                connections.GroupBy(connection => connection, new CollectorHoleConnectionComparer()))
             {
                 CollectorHoleConnection first = group.First();
                 FastenerJointPlan joint = new FastenerJointPlan
@@ -144,6 +142,25 @@ namespace SwFeatureDebug
             public ConnectionPort Port;
             public string Phase;
             public double CollectorThicknessMm;
+        }
+
+        private sealed class CollectorHoleConnectionComparer : IEqualityComparer<CollectorHoleConnection>
+        {
+            public bool Equals(CollectorHoleConnection first, CollectorHoleConnection second)
+            {
+                if (object.ReferenceEquals(first, second))
+                    return true;
+                if (first == null || second == null || !SameText(first.Phase, second.Phase))
+                    return false;
+
+                return Math.Abs(ToMm(first.Port.HoleCenter.X - second.Port.HoleCenter.X)) <= CoordinateToleranceMm &&
+                    Math.Abs(ToMm(first.Port.HoleCenter.Z - second.Port.HoleCenter.Z)) <= CoordinateToleranceMm;
+            }
+
+            public int GetHashCode(CollectorHoleConnection connection)
+            {
+                return StringComparer.OrdinalIgnoreCase.GetHashCode(connection == null ? string.Empty : connection.Phase ?? string.Empty);
+            }
         }
     }
 }

@@ -1,34 +1,28 @@
 flowchart TD
-    A["Program.Main"] --> B["ConfigureFromArgs"]
+    A["Program.Main"] --> B["GenerationOptionsParser"]
     A --> C["SolidWorksGenerationRunner"]
 
     C --> D["SolidWorksSession"]
-    C --> E["AssemblyScanner"]
+    C --> E["AssemblyReferencePointScanner"]
     E --> F["FoundPoint"]
 
     F --> G["BusbarPlanBuilder"]
-    G --> H["ManualBusbarRuleSet"]
-    G --> I["ManualPortRuleProvider"]
-    G --> J["CollectorLayoutPlanner"]
-    J --> K["BusbarLengthController"]
-    G --> L["BusbarRoutePlanner"]
-    G --> M["ContactTopologyResolver"]
+    G --> H["Rules"]
+    G --> I["CollectorLayoutPlanner"]
+    G --> J["BusbarRoutePlanner"]
+    G --> K["ContactTopologyResolver"]
+    G --> L["BusbarOverlapHolePlanner"]
+    G --> M["FastenerPlanBuilder"]
+    G --> N["BusbarPlan"]
 
-    H --> N["Rules"]
-    I --> N
-    J --> O["Planning"]
-    K --> O
-    L --> O
-    M --> O
-
-    G --> P["BusbarPlan"]
-    P --> Q["BusbarBatchBuilder"]
-    Q --> R["SheetMetalFeatureBuilder"]
-    R --> S["SheetMetalSketchBuilder"]
-    Q --> T["MountingHoleBuilder"]
-    Q --> U["PartPersistenceService"]
+    N --> O["BusbarPreflightValidator"]
+    O --> P["SolidWorksBusbarPartBuilder"]
+    P --> Q["Sketch / Sheet Metal / Hole"]
+    Q --> R["Staged Components"]
+    R --> S["BusbarGeometryVerifier"]
+    S --> T["GeneratedComponentManager"]
+    N --> U["ProductionReportExporter"]
 
     V["Domain Models"] --> G
-    V --> Q
-    W["CadAbstractions"] -. "future backend boundary" .-> X["ICadSheetMetalBuilder"]
-    X -. "future implementation" .-> Y["SolidWorks / UG / Other CAD"]
+    V --> P
+    V --> U

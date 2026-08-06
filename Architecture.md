@@ -1,170 +1,94 @@
 # 项目架构分析
 
-本文档记录当前 `SWApiDesign` 的真实代码结构。主工程已经从两个大源码文件拆成按职责组织的分层目录，目标是保护业务规则、数据层和未来 UI，使 SolidWorks API 像嵌入式项目里的硬件适配层一样被隔离。
+本文档描述 `SWApiDesign` 当前真实架构。详细到每个脚本和函数的说明见 [docs/SCRIPT_FUNCTION_GUIDE.md](docs/SCRIPT_FUNCTION_GUIDE.md)。
 
-## 1. 文件结构树
+## 1. 主工程结构
 
 ```text
-SWApiDesign
-├─ README.md
-├─ Architecture.md
-├─ BusinessFlow.md
-├─ FunctionCallTree.md
-├─ RefactorProposal.md
-├─ Architecture.mmd
-├─ 数据层.xlsx
-├─ C#
-│  ├─ TopToDown
-│  │  ├─ TopToDown.slnx
-│  │  └─ TopToDown
-│  │     ├─ Program.cs
-│  │     ├─ App
-│  │     │  └─ ProgramUtilities.cs
-│  │     ├─ CadAbstractions
-│  │     │  ├─ CadPartSpecs.cs
-│  │     │  └─ ICadSheetMetalBuilder.cs
-│  │     ├─ Domain
-│  │     │  ├─ BusbarGenerationSettings.cs
-│  │     │  ├─ BusbarModels.cs
-│  │     │  ├─ BusbarProfile.cs
-│  │     │  ├─ Enums.cs
-│  │     │  ├─ FoundPoint.cs
-│  │     │  ├─ LoubaoGroup.cs
-│  │     │  ├─ Point3.cs
-│  │     │  ├─ SheetMetalBaseFlangeExtent.cs
-│  │     │  └─ SheetMetalOpenProfilePlane.cs
-│  │     ├─ Planning
-│  │     │  ├─ BusbarPlanBuilder.cs
-│  │     │  ├─ BusbarRoutePlanner.cs
-│  │     │  ├─ CollectorLayoutPlanner.cs
-│  │     │  └─ ContactTopologyResolver.cs
-│  │     ├─ Rules
-│  │     │  ├─ ManualBusbarRuleSet.cs
-│  │     │  └─ ManualPortRuleProvider.cs
-│  │     ├─ SolidWorks
-│  │     │  ├─ SolidWorksGenerationRunner.cs
-│  │     │  ├─ SolidWorksSession.cs
-│  │     │  ├─ AssemblyScanner.cs
-│  │     │  ├─ PreviewBuilder.cs
-│  │     │  ├─ BusbarBatchBuilder.cs
-│  │     │  ├─ SheetMetalFeatureBuilder.cs
-│  │     │  ├─ SheetMetalSketchBuilder.cs
-│  │     │  ├─ MountingHoleBuilder.cs
-│  │     │  ├─ CadGeometryUtilities.cs
-│  │     │  └─ PartPersistenceService.cs
-│  │     ├─ TopToDown.csproj
-│  │     └─ Properties/AssemblyInfo.cs
-│  └─ FeatureExtract
-│     └─ FeatureExtract/Program.cs
-├─ docs
-│  ├─ BUSBAR_ARCHITECTURE.md
-│  ├─ CODE_ANALYSIS.md
-│  ├─ GIT_WORKFLOW.md
-│  └─ PROJECT_STRUCTURE.md
-└─ SWtopToDown
-   ├─ APITest.SLDASM
-   ├─ Top-Down.SLDASM
-   ├─ fuse24.SLDPRT
-   └─ loubao.SLDPRT
+C#/TopToDown
+├─ TopToDown.slnx
+├─ TopToDown
+│  ├─ Program.cs
+│  ├─ App
+│  │  └─ GenerationOptionsParser.cs
+│  ├─ Domain
+│  ├─ Rules
+│  ├─ Planning
+│  ├─ Reporting
+│  ├─ SolidWorks
+│  │  ├─ SolidWorksGenerationRunner.cs
+│  │  ├─ SolidWorksSession.cs
+│  │  ├─ AssemblyScanner.cs
+│  │  ├─ BusbarBatchBuilder.cs
+│  │  ├─ GeneratedComponentManager.cs
+│  │  ├─ BusbarGeometryVerifier.cs
+│  │  └─ 草图、钣金、孔、保存等实现文件
+│  └─ TopToDown.csproj
+└─ TopToDown.Tests
+   └─ 纯规则与边界测试
 ```
+
+未使用的 `CadAbstractions` 已删除。当前只有 SolidWorks 一个 CAD 后端，提前保留接口不能降低复杂度；以后真正接入 UG/NXOpen 时，再从稳定的 `BusbarPlan` 中提取两个后端共同需要的最小契约。
 
 ## 2. 分层职责
 
-| 层 | 位置 | 职责 | 是否依赖 SolidWorks |
-| --- | --- | --- | --- |
-| 应用入口 | `Program.cs`、`App` | 默认参数、命令行参数、异常边界 | 否 |
-| CAD 抽象 | `CadAbstractions` | CAD 中立的零件规格、孔规格、后端接口雏形 | 否 |
-| 领域模型 | `Domain` | 点、端口、铜排、规格、计划对象、枚举 | 否 |
-| 规则层 | `Rules` | 当前典设规则、端口生成规则 | 否 |
-| 规划层 | `Planning` | 设备识别、汇流排布局、路径、拓扑补偿、计划构建 | 否 |
-| SolidWorks 适配层 | `SolidWorks` | SW 会话、装配扫描、草图、钣金、打孔、保存、装配插入 | 是 |
-| 诊断工具 | `C#/FeatureExtract` | 独立扫描 SW 特征和参考点 | 是 |
+| 层 | 职责 | 依赖 SolidWorks |
+| --- | --- | --- |
+| `Program` / `App` | 默认参数、命令行解析、进程退出码、异常边界 | 否 |
+| `Domain` | 点、端口、铜排、规格、计划、标准件等业务对象 | 否 |
+| `Rules` | 端口规则、搭接孔矩阵、当前手动规则 | 否 |
+| `Planning` | 设备识别、布局、路径、拓扑、孔位、预检、螺栓计划 | 否 |
+| `Reporting` | 从 `BusbarPlan` 导出生产与加工报表 | 否 |
+| `SolidWorks` | 扫描装配、生成钣金、打孔、保存、插入、实体校验 | 是 |
 
-## 3. 当前依赖方向
+依赖方向：
 
 ```text
 Program
   -> SolidWorksGenerationRunner
-      -> SolidWorks API
-      -> Planning
-          -> Rules
-          -> Domain
-      -> Domain
-
-CadAbstractions
-  -> Domain
+      -> AssemblyReferencePointScanner
+      -> BusbarPlanBuilder -> Rules / Domain
+      -> BusbarPreflightValidator
+      -> SolidWorksBusbarPartBuilder
+      -> BusbarGeometryVerifier
+      -> ProductionReportExporter
 ```
 
-约束目标：
+`Domain`、`Rules`、`Planning`、`Reporting` 不允许引用 `ModelDoc2`、`Feature`、`Component2` 等 SolidWorks 类型。
 
-- 业务模型、规则、规划不认识 `ModelDoc2`、`Feature`、`SketchManager` 等 SolidWorks 类型。
-- SolidWorks 层可以依赖业务层，把 `BusbarPlan` 和 `Busbar` 渲染为 SW 钣金零件。
-- 后续如果新增 UG/NXOpen 后端，应新增 `CadNx` 或类似目录，而不是改写业务规则。
+## 3. 主流程
 
-## 4. 核心类关系
-
-```mermaid
-classDiagram
-    class Program {
-        +Main(args)
-        -ConfigureFromArgs(args)
-    }
-
-    class SolidWorksGenerationRunner {
-        -RunSolidWorksGeneration()
-    }
-
-    class BusbarPlanBuilder {
-        +BuildPlanFromScannedAssembly()
-    }
-
-    class ManualBusbarRuleSet
-    class ManualPortRuleProvider
-    class CollectorLayoutPlanner
-    class BusbarLengthController
-    class BusbarRoutePlanner
-    class ContactTopologyResolver
-    class BusbarPlan
-    class Busbar
-    class ConnectionPort
-    class SheetMetalPartSpec
-    class ICadSheetMetalBuilder
-
-    Program --> SolidWorksGenerationRunner
-    SolidWorksGenerationRunner --> BusbarPlanBuilder
-    SolidWorksGenerationRunner --> BusbarPlan
-    SolidWorksGenerationRunner --> Busbar
-
-    BusbarPlanBuilder --> ManualBusbarRuleSet
-    BusbarPlanBuilder --> ManualPortRuleProvider
-    BusbarPlanBuilder --> CollectorLayoutPlanner
-    BusbarPlanBuilder --> BusbarRoutePlanner
-    BusbarPlanBuilder --> ContactTopologyResolver
-    BusbarPlanBuilder --> BusbarPlan
-
-    CollectorLayoutPlanner --> BusbarLengthController
-    BusbarRoutePlanner --> ConnectionPort
-    ContactTopologyResolver --> Busbar
-    BusbarPlan --> Busbar
-    Busbar --> ConnectionPort
-    ICadSheetMetalBuilder --> SheetMetalPartSpec
+```text
+严格解析命令行
+-> 校验配置
+-> 连接并扫描当前 SolidWorks 装配体
+-> 建立 BusbarPlan
+-> 生成前预检
+-> 生成本轮全部零件文件
+-> 临时插入新组件
+-> 校验实际尺寸、孔贯穿和双排贴合
+-> 校验通过后删除旧 Busbar_* 组件
+-> 最终实体校验
+-> 完整生成时导出生产报表
 ```
 
-## 5. 当前耦合点
+旧组件删除由 `GeneratedComponentManager` 负责，不属于扫描器。新组件暂存校验失败时，本轮组件和文件会清理，旧组件保持不动。SolidWorks 不提供通用数据库事务，因此旧件删除开始后的异常不能承诺原子回滚，最终校验和装配体版本管理仍然必要。
 
-- `SolidWorks` 层目前仍以 `partial Program` 承载，是第一轮拆分后的过渡形态；后续可继续收敛成独立服务类。
-- `BusbarSettings` 仍在 `Program.cs` 中初始化，后续应迁移到 `GenerationOptions`、UI 输入或数据层。
-- 折弯半径、孔径、搭接规则目前仍是默认规则，后续应抽出 `BendRadiusRules`、`HoleLayoutPlanner`、`BusbarLapJointRules`、`FastenerRules`。
-- `CadAbstractions` 已有接口雏形，但当前生成流程尚未通过该接口运行。
+## 4. 关键设计决定
 
-## 6. 当前结论
+- `Program` 不再承载 CAD 方法，只保存默认设置并启动 Runner。
+- `GenerationOptions` 按运行实例传递，不使用全局可变命令行标志。
+- 搭接矩阵未覆盖时失败关闭，不再用中心孔掩盖缺失规则。
+- 孔切除使用唯一方向和材料厚度，不通过多组参数反复试切。
+- 实体校验不仅读取切除特征深度，还匹配实际圆柱面并检查孔沿厚度方向的物理跨度。
+- 双排下排通过 `BranchLegRole.Lower` 表达，不再依赖文件名推断业务语义。
+- `Point3` 明确使用 SolidWorks 的米制内部单位；面向工程师的配置继续使用 `Mm` 后缀。
 
-当前项目已经进入“业务规则与 CAD 适配分离”的第一阶段。下一步应优先把固定参数和孔位规则从默认代码迁出，再接入 `数据层.xlsx`，最后把 SolidWorks 层从 `partial Program` 继续收敛成真正的 CAD 后端实现。
+## 5. 当前边界
 
-## 7. 2026-07 当前实测经验
+- `250A -> 4 x 20mm` 已配置，但 `20mm` 搭接孔规则尚未批准，因此相关装配会停止规划。
+- Excel 数据层尚未成为运行时数据源，当前规则仍由代码配置。
+- 自动测试覆盖纯规则与命令行边界；SolidWorks COM、真实实体方向和装配干涉仍需实机验证。
+- 折弯半径按公司现有刀具固定为 `5mm`。
 
-分支排已支持按相别选择拓扑：ABC 默认生成 `_Lower`、`_Upper` 双排夹接，N 排默认保留单排。该业务选择在 `BusbarPlanBuilder` 完成；`BusbarRoutePlanner` 只负责生成各自路径，`ContactTopologyResolver` 只处理端部裕度与厚度过渡。
-
-实测确认：汇流排路径位于其上表面，分支排搭接端路径位于其下表面。路径参考点、实体接触面和孔草图面必须分开建模；孔型由规划层决定，SolidWorks 层只负责将孔落在真实实体表面。ABC 外侧 `_Upper` 使用专用 Y+/Z- 斜向避让路径，但不改变最终夹接高度或汇流排搭接坐标。
-
-完整公式、失败原因与局部验证流程见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。
+双排几何公式与历史故障见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)，当前规则与命令见 [docs/BUSBAR_ARCHITECTURE.md](docs/BUSBAR_ARCHITECTURE.md)。

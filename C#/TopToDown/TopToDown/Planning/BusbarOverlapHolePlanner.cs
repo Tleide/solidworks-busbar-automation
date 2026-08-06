@@ -5,8 +5,6 @@ namespace SwFeatureDebug
 {
     internal class BusbarOverlapHolePlanner
     {
-        private const double FallbackHoleDiameterMm = 13.0;
-
         public List<ConnectionPort> CreateCollectorOverlapPorts(
             ConnectionPort centerPort,
             Busbar connectedBusbar,
@@ -24,7 +22,12 @@ namespace SwFeatureDebug
 
             BusbarOverlapHoleRule rule;
             if (!BusbarOverlapRuleMatrix.TryResolve(connectedBusbar.Profile.WidthMm, collectorProfile.WidthMm, out rule))
-                return CreateFallbackPorts(centerPort, connectedBusbar.Profile, collectorProfile);
+            {
+                throw new InvalidOperationException(
+                    "No approved overlap hole rule exists for " +
+                    connectedBusbar.Profile.WidthMm.ToString("0.###") + "x" +
+                    collectorProfile.WidthMm.ToString("0.###") + "mm.");
+            }
 
             Console.WriteLine(
                 "Overlap hole rule [" + connectedBusbar.Name + " -> " + centerPort.Name + "]: " +
@@ -99,28 +102,6 @@ namespace SwFeatureDebug
                     centerPort.Name + "_DiagonalB",
                     BusbarDirectionResolver.Add(centerPort.HoleCenter, BusbarDirectionResolver.Scale(offset, -1.0)),
                     rule.HoleDiameterMm)
-            };
-        }
-
-        private static List<ConnectionPort> CreateFallbackPorts(
-            ConnectionPort centerPort,
-            BusbarProfile connectedProfile,
-            BusbarProfile collectorProfile)
-        {
-            double diameterMm = centerPort.HoleDiameterMm > 0.0
-                ? centerPort.HoleDiameterMm
-                : FallbackHoleDiameterMm;
-
-            Console.WriteLine(
-                "No overlap hole matrix rule for " +
-                connectedProfile.WidthMm.ToString("0.###") + "x" +
-                collectorProfile.WidthMm.ToString("0.###") +
-                ". Use center hole fallback, diameter=" +
-                diameterMm.ToString("0.###") + "mm.");
-
-            return new List<ConnectionPort>
-            {
-                ClonePort(centerPort, centerPort.Name + "_Fallback", centerPort.HoleCenter, diameterMm)
             };
         }
 

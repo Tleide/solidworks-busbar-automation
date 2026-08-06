@@ -8,10 +8,13 @@
 扫描装配体参考点
 -> 构建连接端口
 -> 规划 ABC + N 铜排
+-> 生成前规则预检
 -> 生成 2D 开放轮廓草图
 -> Sheet Metal Base Flange MidPlane 生成钣金铜排
 -> 按端口孔中心打孔
--> 保存零件并插回装配体
+-> 暂存插入并校验实体
+-> 校验通过后替换旧铜排
+-> 导出生产报表
 ```
 
 ## 当前能力
@@ -30,36 +33,43 @@
 
 ```text
 C#/TopToDown/TopToDown
-├─ Program.cs                    # 应用入口、默认参数、命令行参数
-├─ App                           # 入口辅助方法
-├─ CadAbstractions               # CAD 中立规格描述和后端接口雏形
+├─ Program.cs                    # 默认工程参数和进程级异常边界
+├─ App                           # 命令行解析和入口辅助方法
 ├─ Domain                        # 铜排、端口、点、规格、枚举等纯业务模型
 ├─ Planning                      # 汇流排布局、路径规划、拓扑补偿、计划构建
 ├─ Rules                         # 当前手动规则、端口规则
+├─ Reporting                     # 生产与加工报表
 ├─ SolidWorks                    # SolidWorks 会话、扫描、钣金、孔、保存、装配插入
 └─ TopToDown.csproj
 ```
 
 分层原则：
 
-- `Domain`、`Rules`、`Planning`、`CadAbstractions` 不引用 SolidWorks API。
+- `Domain`、`Rules`、`Planning`、`Reporting` 不引用 SolidWorks API。
 - SolidWorks 相关类型集中在 `SolidWorks` 目录。
-- `CadAbstractions` 先保留 `SheetMetalPartSpec`、`HoleSpec`、`ICadSheetMetalBuilder`，为后续 UG/NXOpen 或其他 CAD 后端预留接口方向。
+- 当前只有一个 SolidWorks 后端，因此不保留未被使用的 CAD 接口。后续真正接入 UG/NXOpen 时，再从已经稳定的 `BusbarPlan` 契约提取最小后端边界。
+- 主调用方向是 `Program -> SolidWorksGenerationRunner -> AssemblyReferencePointScanner / BusbarPlanBuilder / SolidWorksBusbarPartBuilder`。
 
 ## 运行方式
 
 1. 打开 SolidWorks。
 2. 打开并激活目标装配体。
 3. 构建并运行 `C#/TopToDown/TopToDown/TopToDown.csproj`。
-4. 默认会删除装配体中旧的 `Busbar_*` 组件，然后生成新的铜排。
+4. 默认先生成并插入临时命名的新铜排，实体校验通过后才删除旧的 `Busbar_*` 组件。生成或暂存校验失败时会删除本轮临时组件和零件文件。
 
 可用参数：
 
 ```text
 --verbose        输出更详细的特征扫描日志
---keep-existing  保留装配体中已有 Busbar_* 组件
+--keep-existing  生成模式下保留装配体中已有 Busbar_* 组件
 --preview        只生成铜排骨架预览线，不生成实体铜排
+--validate       只执行扫描、规划和生成前预检
+--verify-geometry  只校验装配体中已有铜排实体
+--export-report  只规划并导出生产报表
+--only=名称1,名称2  只生成或校验指定铜排
 ```
+
+执行模式参数 `--preview`、`--validate`、`--verify-geometry`、`--export-report` 互斥。未知参数、冲突参数、预检失败和实体校验失败都会返回非零进程退出码。
 
 ## 数据层
 
@@ -94,7 +104,18 @@ N_IN                       漏保 N 相进线端孔中心，可选；如果出�
 
 - ABC 分支排默认采用双排夹接：`_Lower` 贴合汇流排下表面，Z-方向外侧 `_Upper` 贴合汇流排上表面；N 排默认采用传统单排。
 - 搭接孔已按宽度矩阵规划为单孔、直双孔或斜双孔，并在真实铜排实体表面完成贯穿切除。
+- 搭接孔规则严格覆盖 `30/40/50/60mm` 宽度组合；未批准的组合直接阻止规划，不再生成中心孔兜底。当前 `250A -> 4x20mm` 分支排因此不能生成，必须先补充并确认 `20mm` 对应的搭接规则。
 - 外侧上排采用 Y+ 首段、Y+/Z- 斜向避让、Y+ 上升、Z+ 回接的路径；起终点和汇流排搭接高度不变。
-- 可用 `--only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper` 做三件局部装配验证；不带 `--keep-existing` 时会先清除旧 `Busbar_*` 组件。
+- 可用 `--only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper` 做三件局部装配验证；默认只替换这些选中的旧组件，其他 `Busbar_*` 组件保持不动。调试生成时可组合 `--keep-existing`，让暂存的新组件与旧组件并存。
+
+## 测试
+
+纯规则、命令行和规划边界测试位于 `C#/TopToDown/TopToDown.Tests`，不需要启动 SolidWorks：
+
+```powershell
+dotnet test C#/TopToDown/TopToDown.Tests/TopToDown.Tests.csproj -c Release
+```
+
+SolidWorks COM 建模仍需在打开目标装配体的真实环境中验证；单元测试不能替代孔贯穿、实体尺寸和双排贴合校验。
 
 双排高度、孔草图面、路径参数及已排查的错误见 `docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md`。

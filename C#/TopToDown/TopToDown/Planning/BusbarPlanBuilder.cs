@@ -15,7 +15,9 @@ namespace SwFeatureDebug
             if (foundPoints == null || foundPoints.Count == 0)
                 throw new Exception("No reference points were scanned from the active assembly.");
 
-            ManualBusbarRuleSet rules = ManualBusbarRuleSet.CreateDefault(CabinetTopologyKind.TypicalDesign);
+            ManualBusbarRuleSet rules = ManualBusbarRuleSet.CreateDefault(
+                CabinetTopologyKind.TypicalDesign,
+                settings);
             ManualPortRuleProvider portRules = new ManualPortRuleProvider(rules);
             CollectorLayoutPlanner collectorPlanner = new CollectorLayoutPlanner(rules, settings);
             BusbarRoutePlanner routePlanner = new BusbarRoutePlanner(settings);
@@ -70,6 +72,7 @@ namespace SwFeatureDebug
                     fuseOut,
                     mainTap,
                     rules,
+                    settings,
                     routePlanner,
                     topology,
                     BranchLegRole.Single);
@@ -258,7 +261,7 @@ namespace SwFeatureDebug
                     AxisOrder = rules.RouteAxisOrder,
                     TransitionPolicy = rules.TransitionPolicy
                 },
-                SheetMetal = SheetMetalOptions.FromRules(rules)
+                SheetMetal = SheetMetalOptions.FromRules(rules, settings, BusbarKind.Collector)
             };
 
             busbar.LogicalCenterline = new List<Point3>
@@ -348,6 +351,7 @@ namespace SwFeatureDebug
                     devicePort,
                     tap,
                     rules,
+                    settings,
                     routePlanner,
                     topology,
                     BranchLegRole.Single);
@@ -363,13 +367,13 @@ namespace SwFeatureDebug
                 devicePort.HoleCenter.X,
                 collector,
                 ContactFace.Lower,
-                -collectorProfile.Thickness / 2.0);
+                -collectorProfile.ThicknessMeters / 2.0);
             ApplyBranchCollectorTapRules(lowerTap, collectorProfile, rules, useNeutralTapRules);
             // In the current sheet-metal backend, the collector path is its upper surface and the branch path grows toward Y+.
             double collectorTopY = collector.Center.Y;
             ConnectionPort lowerRouteEnd = CreateRouteCenterlinePort(
                 lowerTap,
-                collectorTopY - collectorProfile.Thickness - branchProfile.Thickness);
+                collectorTopY - collectorProfile.ThicknessMeters - branchProfile.ThicknessMeters);
 
             Busbar lowerBranch = CreateBusbar(
                 "Busbar_" + phase + "_Branch_" + branchIndex + "_Lower",
@@ -378,11 +382,12 @@ namespace SwFeatureDebug
                 devicePort,
                 lowerRouteEnd,
                 rules,
+                settings,
                 routePlanner,
                 topology,
-                // The lower route-end formula already includes the different-side thickness compensation.
-                // Keep this leg as Single so ContactTopologyResolver does not add the same compensation again.
-                BranchLegRole.Single);
+                BranchLegRole.Lower,
+                BranchRouteMode.Standard,
+                ThicknessTransitionPolicy.None);
             ApplyCollectorOverlapHoleRules(lowerBranch, lowerTap, collector, collectorProfile, overlapHolePlanner, true);
             plan.Busbars.Add(lowerBranch);
 
@@ -393,7 +398,7 @@ namespace SwFeatureDebug
                 devicePort.HoleCenter.X,
                 collector,
                 ContactFace.Upper,
-                collectorProfile.Thickness / 2.0);
+                collectorProfile.ThicknessMeters / 2.0);
             ApplyBranchCollectorTapRules(upperTap, collectorProfile, rules, useNeutralTapRules);
             ConnectionPort upperRouteEnd = CreateRouteCenterlinePort(
                 upperTap,
@@ -415,6 +420,7 @@ namespace SwFeatureDebug
                 upperStart,
                 upperRouteEnd,
                 rules,
+                settings,
                 routePlanner,
                 topology,
                 BranchLegRole.Upper,
@@ -498,10 +504,12 @@ namespace SwFeatureDebug
             ConnectionPort start,
             ConnectionPort end,
             ManualBusbarRuleSet rules,
+            BusbarSettings settings,
             BusbarRoutePlanner routePlanner,
             ContactTopologyResolver topology,
             BranchLegRole branchLegRole,
-            BranchRouteMode branchRouteMode = BranchRouteMode.Standard)
+            BranchRouteMode branchRouteMode = BranchRouteMode.Standard,
+            ThicknessTransitionPolicy? transitionPolicy = null)
         {
             Busbar busbar = new Busbar
             {
@@ -514,10 +522,10 @@ namespace SwFeatureDebug
                 Routing = new BusbarRoutingOptions
                 {
                     AxisOrder = rules.RouteAxisOrder,
-                    TransitionPolicy = rules.TransitionPolicy,
+                    TransitionPolicy = transitionPolicy ?? rules.TransitionPolicy,
                     BranchRouteMode = branchRouteMode
                 },
-                SheetMetal = SheetMetalOptions.FromRules(rules)
+                SheetMetal = SheetMetalOptions.FromRules(rules, settings, kind)
             };
 
             busbar.LogicalCenterline = routePlanner.CreateRoute(kind, profile, start, end, busbar.Routing);
@@ -560,7 +568,7 @@ namespace SwFeatureDebug
             return value * 1000.0;
         }
 
-        private static string FindFuseComponent(List<FoundPoint> foundPoints, string[] phaseNames)
+        internal static string FindFuseComponent(List<FoundPoint> foundPoints, string[] phaseNames)
         {
             var candidates = foundPoints
                 .GroupBy(p => p.ComponentName)
@@ -568,20 +576,28 @@ namespace SwFeatureDebug
                 {
                     ComponentName = g.Key,
                     OutCount = phaseNames.Count(phase => g.Any(p => SameText(p.PointName, phase + "_OUT"))),
-                    InCount = phaseNames.Count(phase => g.Any(p => SameText(p.PointName, phase + "_IN"))),
-                    NameScore = ScoreNameHint(g.Key, FuseComponentNameHints) - ScoreNameHint(g.Key, LoubaoComponentNameHints)
+                    NameScore = ScoreNameHint(g.Key, FuseComponentNameHints) -
+                        ScoreNameHint(g.Key, LoubaoComponentNameHints)
                 })
-                .Where(x => x.OutCount == phaseNames.Length)
-                .OrderByDescending(x => x.NameScore)
-                .ThenByDescending(x => x.OutCount)
-                .ThenByDescending(x => x.InCount)
+                .Where(x => x.OutCount == phaseNames.Length && x.NameScore > 0)
                 .ToList();
 
-            var fuse = candidates.FirstOrDefault();
-            if (fuse == null)
-                throw new Exception("No fuse component was found for planning.");
+            if (candidates.Count == 0)
+            {
+                throw new Exception(
+                    "No component has complete phase OUT points and a recognized fuse name. " +
+                    "Use a standard fuse component name or update FuseComponentNameHints.");
+            }
 
-            return fuse.ComponentName;
+            if (candidates.Count > 1)
+            {
+                throw new Exception(
+                    "Multiple components have complete phase OUT points and a recognized fuse name: " +
+                    string.Join(", ", candidates.Select(candidate => candidate.ComponentName).ToArray()) +
+                    ". Keep exactly one fuse component or make the component contract explicit.");
+            }
+
+            return candidates[0].ComponentName;
         }
 
         private static List<LoubaoGroup> FindLoubaoGroups(
@@ -686,11 +702,16 @@ namespace SwFeatureDebug
 
         private static FoundPoint FindRequiredPoint(List<FoundPoint> points, string componentName, string pointName)
         {
-            FoundPoint point = points.FirstOrDefault(p => SameText(p.ComponentName, componentName) && SameText(p.PointName, pointName));
-            if (point == null)
+            List<FoundPoint> matches = points
+                .Where(point => SameText(point.ComponentName, componentName) && SameText(point.PointName, pointName))
+                .ToList();
+            if (matches.Count == 0)
                 throw new Exception("Missing reference point: " + componentName + "." + pointName);
 
-            return point;
+            if (matches.Count > 1)
+                throw new Exception("Duplicate reference point: " + componentName + "." + pointName);
+
+            return matches[0];
         }
 
         private static int ScoreNameHint(string componentName, string[] hints)

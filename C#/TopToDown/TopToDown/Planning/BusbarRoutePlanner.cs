@@ -43,9 +43,9 @@ namespace SwFeatureDebug
         {
             Point3 p0 = start.HoleCenter;
             Point3 p4 = end.HoleCenter;
-            double initialRise = _settings.DoubleClampOuterInitialRise;
-            double minimumDiagonalLength = _settings.DoubleClampOuterDiagonalMinimumLength;
-            double additionalOutsideOffsetZ = profile.Thickness * 2.0;
+            double initialRise = _settings.DoubleClampOuterInitialRiseMeters;
+            double minimumDiagonalLength = _settings.DoubleClampOuterDiagonalMinimumLengthMeters;
+            double additionalOutsideOffsetZ = profile.ThicknessMeters * 2.0;
 
             if (initialRise <= 0.0)
                 throw new Exception("Double-clamp outer initial rise must be greater than zero.");
@@ -139,7 +139,7 @@ namespace SwFeatureDebug
             {
                 LeadOutY = CalculateMainFeedLeadOutY(start),
                 ApproachZ = CalculateMainFeedApproachZ(profile, start.HoleCenter.Z, end.HoleCenter.Z),
-                LeadOutRule = "Current simple rule: device preferred Y lead direction * Settings.MainLeadOutY.",
+                LeadOutRule = "Current simple rule: device preferred Y lead direction * Settings.MainLeadOutYMeters.",
                 ApproachRule = "Current simple rule: stay outside collector by half collector width + half main-feed width + front clearance."
             };
         }
@@ -150,7 +150,7 @@ namespace SwFeatureDebug
             if (start.PreferredLeadAxis == AxisDirection.Y && start.PreferredLeadSign != 0)
                 sign = start.PreferredLeadSign > 0 ? 1 : -1;
 
-            return sign * _settings.MainLeadOutY;
+            return sign * _settings.MainLeadOutYMeters;
         }
 
         private double CalculateMainFeedApproachZ(BusbarProfile mainFeedProfile, double startZ, double collectorTapZ)
@@ -176,9 +176,9 @@ namespace SwFeatureDebug
         private double CalculateMainFeedApproachOffsetZ(BusbarProfile mainFeedProfile)
         {
             // V0 keeps the long Y move outside the collector width envelope, then enters the collector on the final Z segment.
-            return _settings.CollectorProfile.Width / 2.0 +
-                mainFeedProfile.Width / 2.0 +
-                _settings.MainCollectorFrontClearance;
+            return _settings.CollectorProfile.WidthMeters / 2.0 +
+                mainFeedProfile.WidthMeters / 2.0 +
+                _settings.MainCollectorFrontClearanceMeters;
         }
 
         private static void Add(List<Point3> points, Point3 point)

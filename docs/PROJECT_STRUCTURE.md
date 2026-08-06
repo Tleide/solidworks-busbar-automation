@@ -10,24 +10,30 @@
 C#/TopToDown/TopToDown
 ├─ Program.cs
 ├─ App
-├─ CadAbstractions
 ├─ Domain
 ├─ Planning
 ├─ Rules
+├─ Reporting
 ├─ SolidWorks
 ├─ TopToDown.csproj
 └─ Properties
+
+C#/TopToDown/TopToDown.Tests
+└─ 纯规则、命令行与规划边界测试
 ```
 
 核心职责：
 
-- `Program.cs`：应用入口、默认参数、命令行参数。
-- `App`：入口辅助方法。
+- `Program.cs`：默认工程参数和进程级异常边界。
+- `App`：严格命令行解析和入口辅助方法。
 - `Domain`：铜排业务模型、端口、点、规格、孔型、枚举。
 - `Rules`：当前默认规则、端口规则和搭接孔矩阵。
-- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿和搭接孔位规划。
-- `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、保存并插回装配体。
-- `CadAbstractions`：CAD 中立零件规格和后端接口雏形，后续用于 SW/UG 等后端解耦。
+- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿、搭接孔位、螺栓计划和预检。
+- `Reporting`：从 `BusbarPlan` 导出生产与加工清单。
+- `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、分阶段替换组件并校验真实实体。
+- `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
+
+当前只有 SolidWorks 一个 CAD 后端，未被使用的 `CadAbstractions` 已删除。未来接入 UG/NXOpen 时，应先复用 `Domain/Rules/Planning`，再根据真实的第二后端需求提取最小接口。
 
 ## `C#/FeatureExtract`
 

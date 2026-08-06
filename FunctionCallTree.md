@@ -1,100 +1,71 @@
 # 函数调用树
 
-当前 `TopToDown` 只保留一条主流程。无参数运行时会直接执行完整铜排生成；`--preview` 只生成骨架预览线。
+当前 `TopToDown` 由一个 Runner 协调扫描、规划、建模、校验和报表。无参数运行完整生成；其他模式由 `GenerationOptionsParser` 严格解析。
 
-## 1. Main 调用树
+## 1. 主调用树
 
 ```text
-Main(args)
-├─ ConfigureFromArgs(args)
-└─ RunSolidWorksGeneration()
-   ├─ GetOrStartSolidWorks()
-   ├─ GetActiveOrOpenAssembly(swApp)
-   ├─ [默认实体生成时] DeleteExistingBusbarComponents(model, assembly)
-   ├─ ScanReferencePoints(swApp, model, assembly)
-   │  ├─ DumpModelFeatures(swApp, assemblyModel, null, null, foundPoints)
-   │  │  └─ TryReadReferencePoint(...)
-   │  └─ foreach component
-   │     └─ DumpModelFeatures(swApp, componentModel, componentName, transform, foundPoints)
-   │        └─ TryReadReferencePoint(...)
-   │           └─ TransformPoint(swApp, point, transform)
-   ├─ BusbarPlanBuilder.BuildPlanFromScannedAssembly(foundPoints, PhaseNames, Settings)
-   │  ├─ ManualBusbarRuleSet.CreateDefault(...)
-   │  ├─ new ManualPortRuleProvider(rules)
-   │  ├─ new CollectorLayoutPlanner(rules, settings)
-   │  ├─ new BusbarRoutePlanner(settings)
-   │  ├─ new ContactTopologyResolver()
-   │  ├─ FindFuseComponent(...)
-   │  ├─ FindLoubaoGroups(...)
-   │  ├─ foreach phase A/B/C
-   │  │  ├─ ManualPortRuleProvider.CreateFuseOutPort(...)
-   │  │  ├─ ManualPortRuleProvider.CreateLoubaoInPort(...)
-   │  │  ├─ CollectorLayoutPlanner.CreateLayout(...)
-   │  │  │  └─ BusbarLengthController.Calculate(...)
-   │  │  ├─ CollectorLayoutPlanner.CreateTap(...)
-   │  │  ├─ CreateBusbar(MainFeed)
-   │  │  │  ├─ BusbarRoutePlanner.CreateRoute(...)
-   │  │  │  └─ ContactTopologyResolver.CreateSheetMetalSketchLine(...)
-   │  │  ├─ CreateBusbar(Branch)
-   │  │  │  ├─ BusbarRoutePlanner.CreateRoute(...)
-   │  │  │  └─ ContactTopologyResolver.CreateSheetMetalSketchLine(...)
-   │  │  └─ CreateCollectorBusbar(...)
-   │  │     └─ ContactTopologyResolver.CreateSheetMetalSketchLine(...)
-   │  └─ AddNeutralCollectorAndBranches(...)
-   │     ├─ CreateNeutralLoubaoInputs(...)
-   │     ├─ CollectorLayoutPlanner.CreateLayout(N)
-   │     ├─ CreateBusbar(N Branch)
-   │     └─ CreateCollectorBusbar(N)
-   ├─ [如果 --preview]
-   │  └─ CreateBusbarPreviewPart(swApp, model, assembly, plan)
-   └─ [默认生成实体]
+Program.Main(args)
+├─ GenerationOptionsParser.Parse(args)
+└─ new SolidWorksGenerationRunner(Settings, options).Run()
+   ├─ BusbarPreflightValidator.ValidateConfiguration(settings)
+   ├─ SolidWorksSession.GetOrStartSolidWorks()
+   ├─ SolidWorksSession.GetActiveOrOpenAssembly(swApp)
+   ├─ new AssemblyReferencePointScanner(verbose).Scan(...)
+   │  ├─ ReadReferencePointTemplates(...)
+   │  ├─ ScanComponentReferencePoints(...)
+   │  └─ AddFoundPoints(...) / TransformPoint(...)
+   ├─ BusbarPlanBuilder.BuildPlanFromScannedAssembly(...)
+   │  ├─ 识别刀熔与漏保额定电流
+   │  ├─ ManualPortRuleProvider 创建端口
+   │  ├─ CollectorLayoutPlanner 计算汇流排位置与长度
+   │  ├─ BusbarRoutePlanner 生成路径
+   │  ├─ ContactTopologyResolver 生成钣金草图线
+   │  ├─ BusbarOverlapHolePlanner 展开搭接孔
+   │  └─ FastenerPlanBuilder 生成螺栓计划
+   ├─ BusbarPreflightValidator.ValidatePlan(...)
+   ├─ [--validate] 输出预检后结束
+   ├─ [--export-report] ProductionReportExporter.Export(...)
+   ├─ [--verify-geometry] BusbarGeometryVerifier.Verify(...)
+   ├─ [--preview] SolidWorksBusbarPartBuilder.CreateBusbarPreviewPart(...)
+   └─ [完整生成] SolidWorksBusbarPartBuilder.CreateBusbarSheetMetalParts(...)
       ├─ SelectBusbarsForSheetMetalBatch(plan)
-      └─ CreateBusbarSheetMetalParts(swApp, model, assembly, busbars)
-         └─ foreach busbar
-            └─ CreateBusbarSheetMetalPart(...)
-               ├─ NewPartDocument(swApp)
-               ├─ CreateBusbarSheetMetalFeature(...)
-               │  ├─ GetOpenProfilePlane(...)
-               │  ├─ CreateSheetMetalOpenProfileSketch(...)
-               │  └─ CreateSheetMetalBaseFlangeFromSelectedSketch(...)
-               ├─ CreateBusbarMountingHoles(...)
-               │  └─ CreateBusbarMountingHole(...)
-               │     ├─ GetHoleSketchPlane(...)
-               │     ├─ CreateOffsetPlane(...)
-               │     ├─ CreateDirectedBlindCutFromActiveSketch(...)
-               │     └─ CreateDirectedBlindCutFromSketch(...) fallback
-               ├─ SaveBusbarSheetMetalPart(...)
-               ├─ InsertPartIntoAssembly(...)
-               └─ CloseBusbarPartDocument(...)
+      ├─ foreach busbar: CreateBusbarSheetMetalPart(...)
+      │  ├─ NewPartDocument(...)
+      │  ├─ CreateSheetMetalOpenProfileSketch(...)
+      │  ├─ CreateSheetMetalBaseFlangeFromSelectedSketch(...)
+      │  ├─ CreateBusbarMountingHoles(...)
+      │  ├─ SaveBusbarSheetMetalPart(...)
+      │  ├─ InsertPartIntoAssembly(..., "StagedBusbar_*")
+      │  └─ finally CloseBusbarPartDocument(...)
+      ├─ BusbarGeometryVerifier.VerifyStaged(...)
+      ├─ [失败] GeneratedComponentManager.DeleteSelected(...) + 删除本轮文件
+      ├─ [通过] 重命名暂存组件
+      └─ GeneratedComponentManager.DeleteExistingBusbars(...)
+   ├─ BusbarGeometryVerifier.Verify(...)
+   └─ [完整且校验通过] ProductionReportExporter.Export(...)
 ```
 
-## 2. 主要函数说明
+## 2. 关键入口
 
-| 函数 | 位置 | 输入 | 输出 | 职责 |
-| --- | --- | --- | --- | --- |
-| `ConfigureFromArgs` | `Program.cs` | 命令行参数 | 全局运行开关 | 支持 `--verbose`、`--keep-existing`、`--preview`。 |
-| `RunSolidWorksGeneration` | `SolidWorks/SolidWorksGenerationRunner.cs` | 全局设置和运行开关 | 生成流程执行结果 | 当前 SolidWorks 后端主线。 |
-| `ScanReferencePoints` | `SolidWorks/AssemblyScanner.cs` | SW 装配体 | `List<FoundPoint>` | 扫描装配体和组件参考点。 |
-| `BuildPlanFromScannedAssembly` | `Planning/BusbarPlanBuilder.cs` | 参考点、相序、设置 | `BusbarPlan` | 生成所有铜排业务对象。 |
-| `SelectBusbarsForSheetMetalBatch` | `SolidWorks/BusbarBatchBuilder.cs` | `BusbarPlan` | `List<Busbar>` | 按生成顺序选择主排、汇流排、分支排和 N 排。 |
-| `CreateBusbarSheetMetalPart` | `SolidWorks/BusbarBatchBuilder.cs` | 单根 `Busbar` | SolidWorks 零件 | 创建钣金实体、孔、保存并装配。 |
-| `CreateSheetMetalBaseFlangeFromSelectedSketch` | `SolidWorks/SheetMetalFeatureBuilder.cs` | 草图、规格 | `Feature` | 调用 SW API 生成 MidPlane 钣金。 |
-| `CreateBusbarMountingHole` | `SolidWorks/MountingHoleBuilder.cs` | `ConnectionPort` | Cut Feature | 按孔中心画圆并切除。 |
+| 函数 | 位置 | 作用 |
+| --- | --- | --- |
+| `Parse` | `App/GenerationOptionsParser.cs` | 解析参数并拒绝未知参数、冲突模式和无效组合。 |
+| `Run` | `SolidWorks/SolidWorksGenerationRunner.cs` | 当前 SolidWorks 后端的唯一流程协调入口。 |
+| `Scan` | `SolidWorks/AssemblyScanner.cs` | 读取命名参考点并转换为装配体坐标。 |
+| `BuildPlanFromScannedAssembly` | `Planning/BusbarPlanBuilder.cs` | 从参考点与配置建立完整 `BusbarPlan`。 |
+| `ValidatePlan` | `Planning/BusbarPreflightValidator.cs` | 在 CAD 建模前检查规划契约。 |
+| `CreateBusbarSheetMetalParts` | `SolidWorks/BusbarBatchBuilder.cs` | 分阶段生成、暂存验证和替换组件。 |
+| `CreateBusbarMountingHole` | `SolidWorks/MountingHoleBuilder.cs` | 在计算出的实体表面创建定向厚度切除。 |
+| `Verify` / `VerifyStaged` | `SolidWorks/BusbarGeometryVerifier.cs` | 检查实体包络、实际圆柱孔贯穿和双排表面贴合。 |
 
-## 3. CAD 后端抽象方向
+## 3. 修改定位
 
-当前流程仍由 `RunSolidWorksGeneration` 直接驱动 SolidWorks 方法。后续可将：
+- 改额定电流与铜排规格：`Program.cs` 的 `PhaseBranchRules` / `NeutralBranchRules`。
+- 改汇流排位置与 X- 外伸：`Program.cs` 参数和 `Planning/CollectorLayoutPlanner.cs`。
+- 改单双排路径：`Planning/BusbarPlanBuilder.cs`、`BusbarRoutePlanner.cs`、`ContactTopologyResolver.cs`。
+- 改搭接孔型：`Rules/BusbarOverlapRuleMatrix.cs`、`Planning/BusbarOverlapHolePlanner.cs`。
+- 改 SolidWorks 孔草图面或切除：`SolidWorks/MountingHoleBuilder.cs`，同时更新实体校验与实机测试。
+- 改报表：`Reporting/ProductionReportExporter.cs`。
 
-```text
-Busbar
--> SheetMetalPartSpec
--> ICadSheetMetalBuilder.CreateSheetMetalPart(spec)
-```
-
-作为新的 CAD 后端边界。SolidWorks 后端实现该接口；如果后续新增 UG/NXOpen，则新增另一个实现，不改 `Domain`、`Rules`、`Planning`。
-
-## 4. 2026-07 双排调用要点
-
-`BusbarPlanBuilder.AddPlannedBranchBusbars(...)` 按相别配置选择拓扑：ABC 默认 `DoubleClamp`，N 默认 `Single`。ABC 的 `_Upper` 设为 `DoubleClampOuterAvoidance` 路径模式，因此 `BusbarRoutePlanner.CreateRoute(...)` 会生成专用的 Y+/Z- 避让路径；`_Lower` 和 N 单排仍走普通路径。
-
-路径生成后才进入 `ContactTopologyResolver` 的端部裕度与厚度过渡，最后由 SolidWorks 层根据真实实体表面创建孔草图和切除。局部实体测试可使用 `--only=Busbar_A_Collector,Busbar_A_Branch_1_Lower,Busbar_A_Branch_1_Upper`。详细实测规则见 [docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md](docs/DOUBLE_CLAMP_IMPLEMENTATION_NOTES.md)。
+更细的函数说明见 [docs/SCRIPT_FUNCTION_GUIDE.md](docs/SCRIPT_FUNCTION_GUIDE.md)。

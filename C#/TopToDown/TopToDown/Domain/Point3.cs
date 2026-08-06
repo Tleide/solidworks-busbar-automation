@@ -2,6 +2,7 @@ using System;
 
 namespace SwFeatureDebug
 {
+    // Geometry coordinates use meters to match the SolidWorks API. Rule/configuration values use explicit *Mm names.
     internal struct Point3
     {
         public double X;

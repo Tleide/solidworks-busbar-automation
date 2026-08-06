@@ -5,11 +5,25 @@ using System.IO;
 
 namespace SwFeatureDebug
 {
-    internal partial class Program
+    internal sealed class SolidWorksGenerationRunner
     {
-        private static void RunSolidWorksGeneration()
+        private static readonly string[] PhaseNames = { "A", "B", "C" };
+        private const string NeutralConductorName = "N";
+
+        private readonly BusbarSettings _settings;
+        private readonly GenerationOptions _options;
+        private readonly SolidWorksBusbarPartBuilder _partBuilder;
+
+        public SolidWorksGenerationRunner(BusbarSettings settings, GenerationOptions options)
         {
-            BusbarPreflightReport configurationReport = BusbarPreflightValidator.ValidateConfiguration(Settings);
+            _settings = settings ?? throw new ArgumentNullException("settings");
+            _options = options ?? throw new ArgumentNullException("options");
+            _partBuilder = new SolidWorksBusbarPartBuilder(options, PhaseNames, NeutralConductorName);
+        }
+
+        public void Run()
+        {
+            BusbarPreflightReport configurationReport = BusbarPreflightValidator.ValidateConfiguration(_settings);
             if (configurationReport.HasErrors)
             {
                 configurationReport.PrintToConsole();
@@ -22,8 +36,8 @@ namespace SwFeatureDebug
             AssemblyDoc assembly;
             try
             {
-                swApp = GetOrStartSolidWorks();
-                model = GetActiveOrOpenAssembly(swApp);
+                swApp = SolidWorksSession.GetOrStartSolidWorks();
+                model = SolidWorksSession.GetActiveOrOpenAssembly(swApp);
                 assembly = (AssemblyDoc)model;
             }
             catch (Exception exception)
@@ -34,11 +48,12 @@ namespace SwFeatureDebug
                 return;
             }
 
-            List<FoundPoint> scannedPoints = ScanReferencePoints(swApp, model, assembly);
+            List<FoundPoint> scannedPoints = new AssemblyReferencePointScanner(_options.VerboseFeatureScan)
+                .Scan(swApp, model, assembly);
             BusbarPlan plan;
             try
             {
-                plan = BusbarPlanBuilder.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, Settings);
+                plan = BusbarPlanBuilder.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, _settings);
             }
             catch (Exception exception)
             {
@@ -48,11 +63,11 @@ namespace SwFeatureDebug
                 return;
             }
 
-            BusbarPreflightReport planReport = BusbarPreflightValidator.ValidatePlan(plan, Settings, PhaseNames);
+            BusbarPreflightReport planReport = BusbarPreflightValidator.ValidatePlan(plan, _settings, PhaseNames);
             planReport.Messages.InsertRange(0, configurationReport.Messages);
             planReport.PrintToConsole();
 
-            if (_exportReportOnly)
+            if (_options.ExportReportOnly)
             {
                 if (planReport.HasErrors)
                 {
@@ -65,7 +80,7 @@ namespace SwFeatureDebug
                 return;
             }
 
-            if (_validateOnly)
+            if (_options.ValidateOnly)
             {
                 Console.WriteLine("Validation-only mode complete. The assembly was not modified.");
                 return;
@@ -77,18 +92,15 @@ namespace SwFeatureDebug
                 return;
             }
 
-            if (_verifyGeometryOnly)
+            if (_options.VerifyGeometryOnly)
             {
                 VerifyExistingGeometry(model, assembly, plan);
                 return;
             }
 
-            if (!_previewOnly && _replaceExistingBusbar)
-                DeleteExistingBusbarComponents(model, assembly);
-
-            if (_previewOnly)
+            if (_options.PreviewOnly)
             {
-                CreateBusbarPreviewPart(swApp, model, assembly, plan);
+                _partBuilder.CreateBusbarPreviewPart(swApp, model, assembly, plan);
                 Console.WriteLine();
                 Console.WriteLine("Busbar preview complete. Press any key to exit.");
                 if (!Console.IsInputRedirected)
@@ -96,15 +108,34 @@ namespace SwFeatureDebug
                 return;
             }
 
-            List<Busbar> busbars = SelectBusbarsForSheetMetalBatch(plan);
-            CreateBusbarSheetMetalParts(swApp, model, assembly, busbars);
+            List<Busbar> busbars = _partBuilder.SelectBusbarsForSheetMetalBatch(plan);
+            _partBuilder.CreateBusbarSheetMetalParts(swApp, model, assembly, busbars);
 
-            bool geometryPassed = VerifyExistingGeometry(model, assembly, plan, busbars);
+            bool geometryPassed = true;
+            if (_options.ReplaceExistingBusbar)
+            {
+                geometryPassed = VerifyExistingGeometry(model, assembly, plan, busbars);
+            }
+            else
+            {
+                Console.WriteLine(
+                    "Final assembly-wide verification was skipped because --keep-existing intentionally leaves duplicate busbar sets. " +
+                    "The newly staged components passed verification before insertion completed.");
+            }
 
-            if (geometryPassed && (_onlyBusbarNames == null || _onlyBusbarNames.Length == 0))
+            if (geometryPassed && _options.ReplaceExistingBusbar &&
+                (_options.OnlyBusbarNames == null || _options.OnlyBusbarNames.Length == 0))
                 ExportProductionReport(model, plan);
-            else if (geometryPassed)
+            else if (geometryPassed && _options.OnlyBusbarNames != null)
                 Console.WriteLine("Production report was skipped because --only generated only part of the complete plan.");
+            else if (geometryPassed && !_options.ReplaceExistingBusbar)
+                Console.WriteLine("Production report was skipped because --keep-existing does not leave a canonical assembly state.");
+
+            if (!geometryPassed)
+            {
+                Console.WriteLine("Busbar generation finished with geometry verification errors.");
+                return;
+            }
 
             Console.WriteLine();
             Console.WriteLine("Busbar sheet metal generation complete. Press any key to exit.");
@@ -112,9 +143,9 @@ namespace SwFeatureDebug
                 Console.ReadKey();
         }
 
-        private static void StopAfterPreflightFailure()
+        private void StopAfterPreflightFailure()
         {
-            if (_validateOnly)
+            if (_options.ValidateOnly)
             {
                 System.Environment.ExitCode = 1;
                 return;
@@ -123,14 +154,19 @@ namespace SwFeatureDebug
             throw new InvalidOperationException("Busbar preflight failed. Existing generated busbars were not changed.");
         }
 
-        private static bool VerifyExistingGeometry(
+        private bool VerifyExistingGeometry(
             ModelDoc2 model,
             AssemblyDoc assembly,
             BusbarPlan plan,
             List<Busbar> expectedBusbars = null)
         {
-            List<Busbar> expected = expectedBusbars ?? SelectBusbarsForSheetMetalBatch(plan);
-            BusbarPreflightReport geometryReport = BusbarGeometryVerifier.Verify(model, assembly, expected);
+            List<Busbar> expected = expectedBusbars ?? _partBuilder.SelectBusbarsForSheetMetalBatch(plan);
+            bool completePlan = _options.OnlyBusbarNames == null || _options.OnlyBusbarNames.Length == 0;
+            BusbarPreflightReport geometryReport = BusbarGeometryVerifier.Verify(
+                model,
+                assembly,
+                expected,
+                completePlan);
             geometryReport.PrintToConsole();
 
             if (geometryReport.HasErrors)

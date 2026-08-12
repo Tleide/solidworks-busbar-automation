@@ -38,9 +38,11 @@ C#/TopToDown
 │  ├─ Planning
 │  ├─ Rules
 │  └─ BusbarAutomation.Core.csproj
+├─ BusbarAutomation.Application  # 输入标准化和规划工作流
+│  ├─ App
+│  └─ BusbarAutomation.Application.csproj
 └─ TopToDown
    ├─ Program.cs                 # 默认工程参数和进程级异常边界
-   ├─ App                        # 应用工作流和输入标准化
    ├─ Cli                        # 命令行解析和组合根
    ├─ Reporting                  # 生产与加工报表
    ├─ SolidWorks                 # SolidWorks 会话、扫描、钣金、孔、保存、装配插入
@@ -50,6 +52,7 @@ C#/TopToDown
 分层原则：
 
 - `Domain`、`Rules`、`Planning` 编译为独立的 `BusbarAutomation.Core.dll`，不引用 SolidWorks API；`Reporting` 同样不引用 SolidWorks API。
+- 输入标准化和规划工作流编译为 `BusbarAutomation.Application.dll`，只依赖 Core，不依赖 SolidWorks。
 - SolidWorks 相关类型集中在 `SolidWorks` 目录。
 - 当前只有一个 SolidWorks 后端，因此不保留未被使用的 CAD 接口。后续真正接入 UG/NXOpen 时，再从已经稳定的 `BusbarManufacturingPlan` 提取两个后端共同需要的最小生成契约。
 - 主调用方向是 `Program -> SolidWorksGenerationRunner -> AssemblyReferencePointScanner -> AssemblySnapshotFactory -> BusbarPlanBuilder.BuildDesignPlan -> BusbarManufacturingPlanner.Build -> 预检/报表/SolidWorks 建模`。

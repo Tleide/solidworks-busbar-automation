@@ -17,11 +17,19 @@
 
 ## 模块说明
 
-### `Program.cs` 与 `App`
+### `Program.cs` 与 `Cli`
 
 - `Program.Main`：唯一进程级异常边界，返回可供脚本判断的退出码。
 - `Program.Settings`：当前人工配置入口，包含铜排规格、布局、单双排、折弯和标准件参数。
 - `GenerationOptionsParser`：严格解析命令行，未知参数和冲突模式直接失败。
+
+### `BusbarAutomation.Application/App`
+
+- `AssemblySnapshotFactory`：将扫描得到的参考点标准化为设备、额定电流和端口快照。
+- `BusbarPlanningWorkflow`：冻结工程配置，执行设计/制造规划和生成前预检。
+- `GenerationOptions`：保存一次运行的模式开关。
+
+该程序集只依赖 `BusbarAutomation.Core`，不引用 SolidWorks 或 CLI。未来 UI 应复用这里的工作流，不复制规划逻辑。
 
 ### `BusbarAutomation.Core/Domain`
 
@@ -59,7 +67,7 @@
 - `BusbarGeometryVerifier`：读取实际包络、切除特征和圆柱面，验证尺寸、孔贯穿及双排贴合；每个零件只扫描一次特征树和实体面，再在内存快照中匹配多个孔。
 - `SolidWorksCom`：只释放生命周期明确的临时 COM 对象。
 
-`Domain / Rules / Planning` 已从主程序源码目录迁入独立的 `BusbarAutomation.Core.dll`。该项目只引用 .NET Framework 基础程序集，不引用 SolidWorks Interop；`TopToDown.exe` 通过项目引用消费 Core。
+`Domain / Rules / Planning` 已从主程序源码目录迁入独立的 `BusbarAutomation.Core.dll`。`BusbarAutomation.Application.dll` 负责输入标准化和工作流，并只依赖 Core；两个程序集都不引用 SolidWorks Interop，`TopToDown.exe` 通过项目引用消费它们。
 
 ## 当前风险边界
 

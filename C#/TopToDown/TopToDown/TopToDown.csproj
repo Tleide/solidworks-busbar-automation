@@ -79,9 +79,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="App\AssemblySnapshotFactory.cs" />
-    <Compile Include="App\BusbarPlanningWorkflow.cs" />
-    <Compile Include="App\GenerationOptions.cs" />
     <Compile Include="Cli\GenerationOptionsParser.cs" />
     <Compile Include="Cli\PreflightConsolePresenter.cs" />
     <Compile Include="Cli\SolidWorksGenerationRunner.cs" />
@@ -108,6 +105,10 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\BusbarAutomation.Application\BusbarAutomation.Application.csproj">
+      <Project>{4C1A5796-C129-43B6-A646-EB502C803544}</Project>
+      <Name>BusbarAutomation.Application</Name>
+    </ProjectReference>
     <ProjectReference Include="..\BusbarAutomation.Core\BusbarAutomation.Core.csproj">
       <Project>{CC0B8C1A-2F6D-4B91-B428-A333A0A19C70}</Project>
       <Name>BusbarAutomation.Core</Name>

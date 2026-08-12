@@ -39,8 +39,8 @@ SolidWorksBusbarBatchGenerator 执行整批真实实体校验
 | 装配体读取 | SolidWorks 会话 | `ModelDoc2`、`AssemblyDoc` | `SolidWorks/SolidWorksSession.cs` |
 | 扫描阶段 | 装配体、组件 Transform | `FoundPoint` | `SolidWorks/AssemblyScanner.cs` |
 | 点位提取 | `RefPoint` | 装配体坐标 `Point3` | `AssemblyScanner.TransformPoint` |
-| 输入标准化 | 所有 `FoundPoint`、支持的电流规格 | `AssemblySnapshot` | `App/AssemblySnapshotFactory.cs` |
-| 应用规划工作流 | 扫描点、工程配置 | `BusbarManufacturingPlan` + 预检报告 | `App/BusbarPlanningWorkflow.cs` |
+| 输入标准化 | 所有 `FoundPoint`、支持的电流规格 | `AssemblySnapshot` | `BusbarAutomation.Application/App/AssemblySnapshotFactory.cs` |
+| 应用规划工作流 | 扫描点、工程配置 | `BusbarManufacturingPlan` + 预检报告 | `BusbarAutomation.Application/App/BusbarPlanningWorkflow.cs` |
 | 端口生成 | 命名点、手动规则 | `ConnectionPort` | `Rules/ManualPortRuleProvider.cs` |
 | 汇流排布局 | 端口、相序、设置 | `CollectorLayout` | `Planning/CollectorLayoutPlanner.cs` |
 | 连接关系 | 设备端口、汇流排 Tap | `Busbar` | `BusbarPlanBuilder.CreateBusbar` |

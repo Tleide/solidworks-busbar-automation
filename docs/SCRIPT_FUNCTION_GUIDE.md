@@ -53,7 +53,7 @@
 
 这一层只表达业务对象，不应该出现 SolidWorks API。
 
-本节以及后续 `Rules`、`Planning` 路径均位于独立项目 `C#/TopToDown/BusbarAutomation.Core`。
+本节以及后续 `Rules`、`Planning` 路径均位于独立项目 `C#/TopToDown/BusbarAutomation.Core`。输入标准化和规划工作流位于 `C#/TopToDown/BusbarAutomation.Application/App`。
 
 ### `Domain/BusbarGenerationSettings.cs`
 
@@ -413,7 +413,7 @@
 | `VerifyExistingGeometry(...)` | 调用只读实体校验器，并在失败时设置非零进程退出码。 |
 | `ExportProductionReport(...)` | 调用 `ProductionReportService` 将当前完整计划导出到装配体旁的 `Reports` 目录。 |
 
-### `App/BusbarPlanningWorkflow.cs`
+### `BusbarAutomation.Application/App/BusbarPlanningWorkflow.cs`
 
 职责：不依赖 SolidWorks 的应用层规划流程。
 
@@ -616,7 +616,7 @@
 | 端口孔径、端部裕度 | `Rules/ManualBusbarRuleSet.cs`、`Planning/BusbarPlanBuilder.cs` |
 | 搭接孔型、孔数、孔径、偏移 | `Rules/BusbarOverlapRuleMatrix.cs`、`Planning/BusbarOverlapHolePlanner.cs` |
 | 直双孔方向判断 | `Planning/BusbarDirectionResolver.cs` |
-| 刀熔/漏保识别规则 | `App/AssemblySnapshotFactory.cs` |
+| 刀熔/漏保识别规则 | `BusbarAutomation.Application/App/AssemblySnapshotFactory.cs` |
 | 汇流排位置和长度 | `Planning/CollectorLayoutPlanner.cs` |
 | 生成前规则预检与控制台报告 | `Planning/BusbarPreflightValidator.cs` |
 | 生成后实体、孔深度、双排表面贴合校验 | `SolidWorks/BusbarGeometryVerifier.cs` |

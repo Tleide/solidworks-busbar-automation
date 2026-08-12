@@ -8,7 +8,7 @@
 Program.Main(args)
 ├─ GenerationOptionsParser.Parse(args)
 └─ new Cli.SolidWorksGenerationRunner(Settings, options).Run()
-   ├─ new BusbarPlanningWorkflow(settings, phaseNames)
+   ├─ new BusbarAutomation.Application.BusbarPlanningWorkflow(settings, phaseNames)
    │  └─ BusbarPreflightValidator.ValidateConfiguration(settings)
    ├─ SolidWorksSession.GetOrStartSolidWorks()
    ├─ SolidWorksSession.GetActiveOrOpenAssembly(swApp)
@@ -59,10 +59,10 @@ Program.Main(args)
 | --- | --- | --- |
 | `Parse` | `Cli/GenerationOptionsParser.cs` | 解析参数并拒绝未知参数、冲突模式和无效组合。 |
 | `Run` | `Cli/SolidWorksGenerationRunner.cs` | 当前 CLI 组合根的流程协调入口；SolidWorks 文件夹只保留 CAD 操作。 |
-| `Build` | `App/BusbarPlanningWorkflow.cs` | 统一执行配置快照、输入标准化、设计/制造规划和生成前预检。 |
+| `Build` | `BusbarAutomation.Application/App/BusbarPlanningWorkflow.cs` | 统一执行配置快照、输入标准化、设计/制造规划和生成前预检。 |
 | `Print` | `Cli/PreflightConsolePresenter.cs` | 将结构化预检报告渲染到控制台。 |
 | `Scan` | `SolidWorks/AssemblyScanner.cs` | 读取命名参考点并转换为装配体坐标。 |
-| `FromFoundPoints` | `App/AssemblySnapshotFactory.cs` | 将 SolidWorks 扫描结果标准化为设备、额定电流和命名端口。 |
+| `FromFoundPoints` | `BusbarAutomation.Application/App/AssemblySnapshotFactory.cs` | 将扫描结果标准化为设备、额定电流和命名端口。 |
 | `BuildDesignPlan` | `BusbarAutomation.Core/Planning/BusbarPlanBuilder.cs` | 从标准化装配输入建立布局、逻辑路径和搭接孔。 |
 | `Build` | `BusbarAutomation.Core/Planning/BusbarManufacturingPlanner.cs` | 补齐钣金草图线、钣金参数和螺栓选型。 |
 | `ValidatePlan` | `BusbarAutomation.Core/Planning/BusbarPreflightValidator.cs` | 在 CAD 建模前检查规划契约。 |

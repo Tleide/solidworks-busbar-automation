@@ -70,7 +70,7 @@ namespace BusbarAutomation.Tests
             string solutionRoot = GetSolutionRoot();
             string[] independentDirectories =
             {
-                Path.Combine(solutionRoot, "TopToDown", "App"),
+                Path.Combine(solutionRoot, "BusbarAutomation.Application", "App"),
                 Path.Combine(solutionRoot, "TopToDown", "Reporting"),
                 Path.Combine(solutionRoot, "BusbarAutomation.Core", "Domain"),
                 Path.Combine(solutionRoot, "BusbarAutomation.Core", "Planning"),

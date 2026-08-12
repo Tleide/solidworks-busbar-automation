@@ -13,9 +13,11 @@ C#/TopToDown
 │  ├─ Planning
 │  ├─ Rules
 │  └─ BusbarAutomation.Core.csproj
+├─ BusbarAutomation.Application
+│  ├─ App
+│  └─ BusbarAutomation.Application.csproj
 ├─ TopToDown
 │  ├─ Program.cs
-│  ├─ App
 │  ├─ Cli
 │  ├─ Reporting
 │  ├─ SolidWorks
@@ -29,9 +31,9 @@ C#/TopToDown/TopToDown.Tests
 核心职责：
 
 - `Program.cs`：默认工程参数和进程级异常边界。
-- `App`：可被 CLI/UI 共用的运行选项契约和不依赖 CAD 的规划工作流。
-- `App/AssemblySnapshotFactory.cs`：将 SolidWorks 扫描点识别为标准化设备输入；组件名称识别和额定电流解析集中在此边界。
-- `Cli`：严格命令行解析、预检控制台展示和当前 SolidWorks 组合根；UI 后续应复用 `App/BusbarPlanningWorkflow`，不复用控制台 presenter。
+- `BusbarAutomation.Application/App`：可被 CLI/未来 UI 共用的运行选项契约和不依赖 CAD 的规划工作流。
+- `BusbarAutomation.Application/App/AssemblySnapshotFactory.cs`：将扫描点识别为标准化设备输入；组件名称识别和额定电流解析集中在此边界。
+- `Cli`：严格命令行解析、预检控制台展示和当前 SolidWorks 组合根；未来 UI 应复用 Application 的规划工作流，不复用控制台 presenter。
 - `BusbarAutomation.Core/Domain`：铜排业务模型、端口、点、规格、孔型、枚举。
 - `BusbarAutomation.Core/Rules`：当前默认规则、端口规则和搭接孔矩阵。
 - `BusbarAutomation.Core/Planning`：从标准化装配快照生成两阶段计划。`BusbarDesignPlan` 保存布局、逻辑路径和搭接孔位；`BusbarManufacturingPlan` 再补齐钣金草图线、钣金参数和螺栓计划。
@@ -42,7 +44,7 @@ C#/TopToDown/TopToDown.Tests
 - `SolidWorks`：连接 SW、扫描装配体、批量生成和校验真实实体。`SolidWorksBusbarBatchGenerator` 负责批次顺序、暂存校验和替换，`SolidWorksBusbarPartBuilder` 只负责单根零件建模。流程协调入口位于 `Cli/SolidWorksGenerationRunner.cs`。
 - `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
 
-当前有两个生产程序集：纯业务核心 `BusbarAutomation.Core.dll` 和 SolidWorks 自动化入口 `TopToDown.exe`。Core 已形成编译隔离且不引用 SolidWorks；Application、Reporting、SolidWorks 和 CLI 暂时继续留在主程序中。详细说明见 `ARCHITECTURE_MIGRATION_PHASE6.md`。
+当前有三个生产程序集：`BusbarAutomation.Core.dll`、`BusbarAutomation.Application.dll` 和 SolidWorks 自动化入口 `TopToDown.exe`。Core 与 Application 均不引用 SolidWorks；Reporting、SolidWorks 和 CLI 暂时继续留在主程序中。详细说明见 `ARCHITECTURE_MIGRATION_PHASE7.md`。
 
 当前规划主链为：
 
@@ -76,6 +78,7 @@ Phase 3 仍复用同一组 `Busbar` 对象，由制造规划器填入派生的�
 - `ARCHITECTURE_MIGRATION_PHASE4.md`：Application、CLI、Reporting 和 SolidWorks 调度职责的分离及验收记录。
 - `ARCHITECTURE_MIGRATION_PHASE5.md`：SolidWorks 批次生成与单根零件建模职责的分离及验收记录。
 - `ARCHITECTURE_MIGRATION_PHASE6.md`：Domain、Rules、Planning 的物理 Core 程序集边界及验收记录。
+- `ARCHITECTURE_MIGRATION_PHASE7.md`：输入标准化和规划工作流的物理 Application 程序集边界及验收记录。
 
 ## `SWtopToDown`
 

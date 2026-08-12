@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\BusbarAutomation.Core\BusbarAutomation.Core.csproj" />
     <ProjectReference Include="..\TopToDown\TopToDown.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{CC0B8C1A-2F6D-4B91-B428-A333A0A19C70}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>BusbarAutomation.Core</RootNamespace>
+    <AssemblyName>BusbarAutomation.Core</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Domain\AssemblySnapshot.cs" />
+    <Compile Include="Domain\BranchBusbarRule.cs" />
+    <Compile Include="Domain\BusbarGenerationSettings.cs" />
+    <Compile Include="Domain\BusbarHoleModels.cs" />
+    <Compile Include="Domain\BusbarModels.cs" />
+    <Compile Include="Domain\BusbarOverlapRuleCatalog.cs" />
+    <Compile Include="Domain\BusbarProfile.cs" />
+    <Compile Include="Domain\EngineeringConfigurationSnapshot.cs" />
+    <Compile Include="Domain\Enums.cs" />
+    <Compile Include="Domain\FastenerModels.cs" />
+    <Compile Include="Domain\FoundPoint.cs" />
+    <Compile Include="Domain\LoubaoGroup.cs" />
+    <Compile Include="Domain\Point3.cs" />
+    <Compile Include="Domain\SheetMetalBaseFlangeExtent.cs" />
+    <Compile Include="Domain\SheetMetalOpenProfilePlane.cs" />
+    <Compile Include="Planning\BusbarDirectionResolver.cs" />
+    <Compile Include="Planning\BusbarManufacturingPlanner.cs" />
+    <Compile Include="Planning\BusbarOverlapHolePlanner.cs" />
+    <Compile Include="Planning\BusbarPlanBuilder.cs" />
+    <Compile Include="Planning\BusbarPlans.cs" />
+    <Compile Include="Planning\BusbarPreflightValidator.cs" />
+    <Compile Include="Planning\BusbarRoutePlanner.cs" />
+    <Compile Include="Planning\CollectorLayoutPlanner.cs" />
+    <Compile Include="Planning\ContactTopologyResolver.cs" />
+    <Compile Include="Planning\FastenerPlanBuilder.cs" />
+    <Compile Include="Rules\BusbarOverlapRuleMatrix.cs" />
+    <Compile Include="Rules\ManualBusbarRuleSet.cs" />
+    <Compile Include="Rules\ManualPortRuleProvider.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

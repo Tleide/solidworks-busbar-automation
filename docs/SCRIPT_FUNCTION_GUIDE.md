@@ -53,6 +53,8 @@
 
 这一层只表达业务对象，不应该出现 SolidWorks API。
 
+本节以及后续 `Rules`、`Planning` 路径均位于独立项目 `C#/TopToDown/BusbarAutomation.Core`。
+
 ### `Domain/BusbarGenerationSettings.cs`
 
 职责：当前默认生成设置。

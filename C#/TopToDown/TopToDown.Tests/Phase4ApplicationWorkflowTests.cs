@@ -67,15 +67,19 @@ namespace BusbarAutomation.Tests
         [TestMethod]
         public void NonCadModulesDoNotReferenceSolidWorksInterop()
         {
-            string sourceRoot = GetProductionSourceRoot();
-            string[] independentDirectories = { "App", "Domain", "Planning", "Reporting", "Rules" };
+            string solutionRoot = GetSolutionRoot();
+            string[] independentDirectories =
+            {
+                Path.Combine(solutionRoot, "TopToDown", "App"),
+                Path.Combine(solutionRoot, "TopToDown", "Reporting"),
+                Path.Combine(solutionRoot, "BusbarAutomation.Core", "Domain"),
+                Path.Combine(solutionRoot, "BusbarAutomation.Core", "Planning"),
+                Path.Combine(solutionRoot, "BusbarAutomation.Core", "Rules")
+            };
             string[] violations = independentDirectories
-                .SelectMany(directory => Directory.GetFiles(
-                    Path.Combine(sourceRoot, directory),
-                    "*.cs",
-                    SearchOption.AllDirectories))
+                .SelectMany(directory => Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories))
                 .Where(path => File.ReadAllText(path).Contains("SolidWorks.Interop"))
-                .Select(path => path.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar))
+                .Select(path => path.Substring(solutionRoot.Length).TrimStart(Path.DirectorySeparatorChar))
                 .ToArray();
 
             Assert.AreEqual(
@@ -84,9 +88,9 @@ namespace BusbarAutomation.Tests
                 "Non-CAD modules must not reference SolidWorks interop: " + string.Join(", ", violations));
         }
 
-        private static string GetProductionSourceRoot([CallerFilePath] string testSourcePath = null)
+        private static string GetSolutionRoot([CallerFilePath] string testSourcePath = null)
         {
-            return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testSourcePath), "..", "TopToDown"));
+            return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testSourcePath), ".."));
         }
     }
 }

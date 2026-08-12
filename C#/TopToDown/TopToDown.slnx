@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="BusbarAutomation.Core/BusbarAutomation.Core.csproj" Id="cc0b8c1a-2f6d-4b91-b428-a333a0a19c70" />
   <Project Path="TopToDown/TopToDown.csproj" Id="f2f93f6a-628c-4473-8c0d-6c8cd255df3b" />
   <Project Path="TopToDown.Tests/TopToDown.Tests.csproj" />
 </Solution>

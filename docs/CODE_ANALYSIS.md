@@ -23,16 +23,16 @@
 - `Program.Settings`：当前人工配置入口，包含铜排规格、布局、单双排、折弯和标准件参数。
 - `GenerationOptionsParser`：严格解析命令行，未知参数和冲突模式直接失败。
 
-### `Domain`
+### `BusbarAutomation.Core/Domain`
 
 纯业务对象，不引用 SolidWorks。核心对象是 `Point3`、`ConnectionPort`、`Busbar`、`BusbarProfile`、`FastenerSpec`。计划容器位于 `Planning`：`BusbarDesignPlan` 保存逻辑结果，`BusbarManufacturingPlan` 保存 CAD/报表可消费的制造结果。`Point3` 使用米，与 SolidWorks 内部单位一致；工程配置字段明确使用 `Mm` 后缀。
 
-### `Rules`
+### `BusbarAutomation.Core/Rules`
 
 - `ManualBusbarRuleSet` / `ManualPortRuleProvider`：把命名参考点转换成工程端口。
 - `BusbarOverlapRuleMatrix`：批准的 30/40/50/60mm 搭接孔矩阵。未覆盖规格失败关闭，不生成中心孔兜底。
 
-### `Planning`
+### `BusbarAutomation.Core/Planning`
 
 - `AssemblySnapshotFactory`：在输入边界识别设备、电流规格和命名端口。
 - `BusbarPlanBuilder`：建立布局、逻辑路径、拓扑和搭接孔的设计计划。
@@ -58,6 +58,8 @@
 - `GeneratedComponentManager`：处理暂存回滚和旧组件删除；完整生成清理全部旧件，`--only` 只按选中的铜排基名替换。
 - `BusbarGeometryVerifier`：读取实际包络、切除特征和圆柱面，验证尺寸、孔贯穿及双排贴合；每个零件只扫描一次特征树和实体面，再在内存快照中匹配多个孔。
 - `SolidWorksCom`：只释放生命周期明确的临时 COM 对象。
+
+`Domain / Rules / Planning` 已从主程序源码目录迁入独立的 `BusbarAutomation.Core.dll`。该项目只引用 .NET Framework 基础程序集，不引用 SolidWorks Interop；`TopToDown.exe` 通过项目引用消费 Core。
 
 ## 当前风险边界
 

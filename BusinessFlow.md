@@ -57,7 +57,7 @@ SolidWorksBusbarBatchGenerator 执行整批真实实体校验
 | 实体校验 | 暂存/既有组件、计划 | 尺寸/孔贯穿/贴合报告 | `SolidWorks/BusbarGeometryVerifier.cs` |
 | 组件替换 | 已通过暂存校验的新组件 | 清理后的装配体 | `SolidWorks/GeneratedComponentManager.cs` |
 | 预检展示 | 结构化预检报告 | 控制台文本 | `Cli/PreflightConsolePresenter.cs` |
-| 报表导出协调 | 制造计划、装配路径 | `Reports/*.xlsx` | `Reporting/ProductionReportService.cs` |
+| 报表导出协调 | 制造计划、装配路径 | `Reports/*.xlsx` | `BusbarAutomation.Reporting/Reporting/ProductionReportService.cs` |
 
 ## 3. Mermaid 流程图
 

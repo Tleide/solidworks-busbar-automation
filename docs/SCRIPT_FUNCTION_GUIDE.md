@@ -355,7 +355,7 @@
 | `BuildCollectorJoints(...)` | 将主排/分支排的汇流排搭接孔按相位和 X/Z 孔位分组；双排上下排共享同一组贯穿螺栓。 |
 | `BuildSelection(...)` | 按孔径匹配 M 规格，计算最小长度并选择最短可用标准长度。 |
 
-### `Reporting/ProductionReportExporter.cs`
+### `BusbarAutomation.Reporting/Reporting/ProductionReportExporter.cs`
 
 职责：把完整的 `BusbarManufacturingPlan` 转换成生产和加工所需的 Excel 报表，不依赖 SolidWorks 实体。它生成漏保选型、铜排汇总、逐根铜排下料明细、钻孔清单、标准件汇总与螺栓明细。
 
@@ -367,7 +367,7 @@
 | `BuildLoubaoSelectionSheet(...)` | 输出每台漏保的额定电流、ABC/N 铜排规格和单/双排拓扑。 |
 | `BuildHoleSheet(...)` | 输出每根实体铜排上的孔径、用途和装配体坐标。 |
 | `BuildFastenerSummarySheet(...)` | 从搭接螺栓计划推导螺栓、两片平垫、弹垫和螺母的数量。 |
-| `ProductionReportWorkbookWriter` | 不依赖 Excel 或第三方 NuGet 包，直接写出包含六个工作表的 `.xlsx` 文件。 |
+| `ProductionReportWorkbookWriter` | 不依赖 Excel 或第三方 NuGet 包，直接写出包含七个工作表的 `.xlsx` 文件。 |
 
 命令行参数 `--export-report` 会在预检通过后只导出报表，不修改装配体；完整建模和实体校验成功后也会自动导出报表。
 
@@ -427,7 +427,7 @@
 
 职责：将结构化预检结果渲染为控制台文本。它不参与规则判断，也不修改报告。
 
-### `Reporting/ProductionReportService.cs`
+### `BusbarAutomation.Reporting/Reporting/ProductionReportService.cs`
 
 职责：根据装配体路径确定 `Reports` 输出目录，再调用 `ProductionReportExporter`。它不调用 SolidWorks API。
 

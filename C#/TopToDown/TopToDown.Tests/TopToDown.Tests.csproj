@@ -12,8 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="System.IO.Compression" />
     <ProjectReference Include="..\BusbarAutomation.Application\BusbarAutomation.Application.csproj" />
     <ProjectReference Include="..\BusbarAutomation.Core\BusbarAutomation.Core.csproj" />
+    <ProjectReference Include="..\BusbarAutomation.Reporting\BusbarAutomation.Reporting.csproj" />
     <ProjectReference Include="..\TopToDown\TopToDown.csproj" />
   </ItemGroup>
 </Project>

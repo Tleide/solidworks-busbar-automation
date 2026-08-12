@@ -52,7 +52,7 @@
 - `FastenerPlanBuilder`：按容差分组搭接孔并选择标准螺栓长度。
 - `BusbarPreflightValidator`：对计划结果做独立契约检查，不调用 SolidWorks。
 
-### `Reporting`
+### `BusbarAutomation.Reporting/Reporting`
 
 `ProductionReportExporter` 从 `BusbarManufacturingPlan` 导出漏保选型、铜排汇总/明细、钻孔清单、标准件汇总和螺栓明细。它不依赖已生成的 SolidWorks 实体。
 
@@ -67,7 +67,7 @@
 - `BusbarGeometryVerifier`：读取实际包络、切除特征和圆柱面，验证尺寸、孔贯穿及双排贴合；每个零件只扫描一次特征树和实体面，再在内存快照中匹配多个孔。
 - `SolidWorksCom`：只释放生命周期明确的临时 COM 对象。
 
-`Domain / Rules / Planning` 已从主程序源码目录迁入独立的 `BusbarAutomation.Core.dll`。`BusbarAutomation.Application.dll` 负责输入标准化和工作流，并只依赖 Core；两个程序集都不引用 SolidWorks Interop，`TopToDown.exe` 通过项目引用消费它们。
+`Domain / Rules / Planning` 已迁入独立的 `BusbarAutomation.Core.dll`。`BusbarAutomation.Application.dll` 负责输入标准化和工作流，`BusbarAutomation.Reporting.dll` 负责生产报表；两者都只依赖 Core。三个类库均不引用 SolidWorks Interop，`TopToDown.exe` 通过项目引用消费它们。
 
 ## 当前风险边界
 

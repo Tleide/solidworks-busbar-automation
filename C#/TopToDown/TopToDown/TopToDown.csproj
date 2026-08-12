@@ -82,8 +82,6 @@
     <Compile Include="Cli\GenerationOptionsParser.cs" />
     <Compile Include="Cli\PreflightConsolePresenter.cs" />
     <Compile Include="Cli\SolidWorksGenerationRunner.cs" />
-    <Compile Include="Reporting\ProductionReportExporter.cs" />
-    <Compile Include="Reporting\ProductionReportService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SolidWorks\AssemblyScanner.cs" />
@@ -108,6 +106,10 @@
     <ProjectReference Include="..\BusbarAutomation.Application\BusbarAutomation.Application.csproj">
       <Project>{4C1A5796-C129-43B6-A646-EB502C803544}</Project>
       <Name>BusbarAutomation.Application</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BusbarAutomation.Reporting\BusbarAutomation.Reporting.csproj">
+      <Project>{1F54A8B8-9DBA-4A64-9A5A-3D174C6BF5F4}</Project>
+      <Name>BusbarAutomation.Reporting</Name>
     </ProjectReference>
     <ProjectReference Include="..\BusbarAutomation.Core\BusbarAutomation.Core.csproj">
       <Project>{CC0B8C1A-2F6D-4B91-B428-A333A0A19C70}</Project>

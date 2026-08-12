@@ -19,6 +19,7 @@ Program / GenerationOptionsParser
 
 - `Application` 已形成独立的 `BusbarAutomation.Application.dll`，只依赖 Core，不依赖 CAD。
 - `Domain / Rules / Planning` 已形成独立的 `BusbarAutomation.Core.dll` 编译边界。
+- `Reporting` 已形成独立的 `BusbarAutomation.Reporting.dll`，只依赖 Core，不依赖 CAD 或主程序。
 - 命令行严格解析与非零失败退出码。
 - 搭接孔规则失败关闭。
 - 双排上下腿使用明确领域语义。

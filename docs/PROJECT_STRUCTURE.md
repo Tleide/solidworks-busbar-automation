@@ -16,10 +16,12 @@ C#/TopToDown
 ├─ BusbarAutomation.Application
 │  ├─ App
 │  └─ BusbarAutomation.Application.csproj
+├─ BusbarAutomation.Reporting
+│  ├─ Reporting
+│  └─ BusbarAutomation.Reporting.csproj
 ├─ TopToDown
 │  ├─ Program.cs
 │  ├─ Cli
-│  ├─ Reporting
 │  ├─ SolidWorks
 │  ├─ TopToDown.csproj
 │  └─ Properties
@@ -40,11 +42,11 @@ C#/TopToDown/TopToDown.Tests
 - `BusbarAutomation.Core/Domain/AssemblySnapshot.cs`：规划层使用的装配输入快照，包含设备、额定电流、端口和装配坐标。
 - `BusbarAutomation.Core/Domain/EngineeringConfigurationSnapshot.cs`：单次规划使用的工程配置快照，隔离运行期间的配置变更。
 - `BusbarAutomation.Core/Domain/BusbarOverlapRuleCatalog.cs`：单次规划与预检共用的搭接孔规则目录快照。
-- `Reporting`：从制造计划导出生产与加工清单，不调用 SolidWorks API；`ProductionReportService` 处理输出目录，`ProductionReportExporter` 处理 workbook 内容。
+- `BusbarAutomation.Reporting/Reporting`：从制造计划导出生产与加工清单，不调用 SolidWorks API；`ProductionReportService` 处理输出目录，`ProductionReportExporter` 处理 workbook 内容。
 - `SolidWorks`：连接 SW、扫描装配体、批量生成和校验真实实体。`SolidWorksBusbarBatchGenerator` 负责批次顺序、暂存校验和替换，`SolidWorksBusbarPartBuilder` 只负责单根零件建模。流程协调入口位于 `Cli/SolidWorksGenerationRunner.cs`。
 - `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
 
-当前有三个生产程序集：`BusbarAutomation.Core.dll`、`BusbarAutomation.Application.dll` 和 SolidWorks 自动化入口 `TopToDown.exe`。Core 与 Application 均不引用 SolidWorks；Reporting、SolidWorks 和 CLI 暂时继续留在主程序中。详细说明见 `ARCHITECTURE_MIGRATION_PHASE7.md`。
+当前有四个生产程序集：`BusbarAutomation.Core.dll`、`BusbarAutomation.Application.dll`、`BusbarAutomation.Reporting.dll` 和 SolidWorks 自动化入口 `TopToDown.exe`。三个类库均不引用 SolidWorks；SolidWorks 和 CLI 继续留在主程序中。详细说明见 `ARCHITECTURE_MIGRATION_PHASE8.md`。
 
 当前规划主链为：
 
@@ -79,6 +81,7 @@ Phase 3 仍复用同一组 `Busbar` 对象，由制造规划器填入派生的�
 - `ARCHITECTURE_MIGRATION_PHASE5.md`：SolidWorks 批次生成与单根零件建模职责的分离及验收记录。
 - `ARCHITECTURE_MIGRATION_PHASE6.md`：Domain、Rules、Planning 的物理 Core 程序集边界及验收记录。
 - `ARCHITECTURE_MIGRATION_PHASE7.md`：输入标准化和规划工作流的物理 Application 程序集边界及验收记录。
+- `ARCHITECTURE_MIGRATION_PHASE8.md`：生产报表的物理 Reporting 程序集边界及最终迁移验收记录。
 
 ## `SWtopToDown`
 

@@ -70,7 +70,7 @@ Program.Main(args)
 | `CreateStagedSheetMetalPart` | `SolidWorks/BusbarPartBuilder.cs` | 创建单根零件、生成钣金与孔、保存，并在零件仍打开时暂存插入装配体。 |
 | `CreateBusbarMountingHole` | `SolidWorks/MountingHoleBuilder.cs` | 在计算出的实体表面创建定向厚度切除。 |
 | `Verify` / `VerifyStaged` | `SolidWorks/BusbarGeometryVerifier.cs` | 检查实体包络、实际圆柱孔贯穿和双排表面贴合。 |
-| `ExportForAssembly` | `Reporting/ProductionReportService.cs` | 根据装配路径选择 `Reports` 目录，再调用报表 exporter。 |
+| `ExportForAssembly` | `BusbarAutomation.Reporting/Reporting/ProductionReportService.cs` | 根据装配路径选择 `Reports` 目录，再调用报表 exporter。 |
 
 ## 3. 修改定位
 
@@ -79,6 +79,6 @@ Program.Main(args)
 - 改单双排路径：`BusbarAutomation.Core/Planning/BusbarPlanBuilder.cs`、`BusbarRoutePlanner.cs`、`ContactTopologyResolver.cs`。
 - 改搭接孔型：`BusbarAutomation.Core/Rules/BusbarOverlapRuleMatrix.cs`、`Planning/BusbarOverlapHolePlanner.cs`。
 - 改 SolidWorks 孔草图面或切除：`SolidWorks/MountingHoleBuilder.cs`，同时更新实体校验与实机测试。
-- 改报表：`Reporting/ProductionReportExporter.cs`。
+- 改报表：`BusbarAutomation.Reporting/Reporting/ProductionReportExporter.cs`。
 
 更细的函数说明见 [docs/SCRIPT_FUNCTION_GUIDE.md](docs/SCRIPT_FUNCTION_GUIDE.md)。

@@ -18,13 +18,17 @@ C#/TopToDown
 │  │  ├─ BusbarPlanningWorkflow.cs
 │  │  └─ GenerationOptions.cs
 │  └─ BusbarAutomation.Application.csproj
+├─ BusbarAutomation.Reporting
+│  ├─ Reporting
+│  │  ├─ ProductionReportExporter.cs
+│  │  └─ ProductionReportService.cs
+│  └─ BusbarAutomation.Reporting.csproj
 ├─ TopToDown
 │  ├─ Program.cs
 │  ├─ Cli
 │  │  ├─ GenerationOptionsParser.cs
 │  │  ├─ PreflightConsolePresenter.cs
 │  │  └─ SolidWorksGenerationRunner.cs
-│  ├─ Reporting
 │  ├─ SolidWorks
 │  │  ├─ SolidWorksSession.cs
 │  │  ├─ AssemblyScanner.cs
@@ -49,7 +53,7 @@ C#/TopToDown
 | `BusbarAutomation.Core/Domain` | 点、端口、铜排、规格、孔和标准件等业务对象 | 否 |
 | `BusbarAutomation.Core/Rules` | 端口规则、搭接孔矩阵、当前手动规则 | 否 |
 | `BusbarAutomation.Core/Planning` | 设计计划、制造计划、布局、路径、拓扑、孔位、预检和螺栓计划 | 否 |
-| `Reporting` | 从 `BusbarManufacturingPlan` 导出生产与加工报表 | 否 |
+| `BusbarAutomation.Reporting/Reporting` | 从 `BusbarManufacturingPlan` 导出生产与加工报表 | 否 |
 | `SolidWorks` | 扫描装配、批次协调、单根零件建模、打孔、保存、插入、实体校验 | 是 |
 
 依赖方向：
@@ -69,7 +73,7 @@ Program
       -> Reporting.ProductionReportService -> ProductionReportExporter
 ```
 
-`Domain`、`Rules` 和 `Planning` 编译为 `BusbarAutomation.Core.dll`；输入标准化和规划工作流编译为 `BusbarAutomation.Application.dll`。两个项目都不引用任何 SolidWorks Interop。`Reporting` 仍在主程序中，但不允许引用 `ModelDoc2`、`Feature`、`Component2` 等 SolidWorks 类型。
+`Domain`、`Rules` 和 `Planning` 编译为 `BusbarAutomation.Core.dll`；输入标准化和规划工作流编译为 `BusbarAutomation.Application.dll`；报表编译为 `BusbarAutomation.Reporting.dll`。三个类库都不引用任何 SolidWorks Interop，主程序只通过项目引用组合它们与 SolidWorks 适配器。
 
 ## 3. 主流程
 
@@ -108,6 +112,7 @@ Program
 - 逻辑布局、路径和搭接孔先进入 `BusbarDesignPlan`；钣金参数、钣金草图线和螺栓选型由 `BusbarManufacturingPlanner` 统一补齐。
 - `BusbarAutomation.Core.dll` 是第一个物理程序集边界；主程序通过项目引用使用 Core，不再直接编译领域、规则和规划源码。
 - `BusbarAutomation.Application.dll` 只依赖 Core，封装可由未来 UI 复用的输入标准化和规划工作流；当前不为尚不存在的 UI 提前公开类型。
+- `BusbarAutomation.Reporting.dll` 只依赖 Core，未来 CLI 或 UI 可复用同一报表实现；主程序不再重复编译报表源码。
 
 ## 5. 当前边界
 

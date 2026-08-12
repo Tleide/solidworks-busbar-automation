@@ -2,15 +2,13 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("BusbarAutomation.Core")]
-[assembly: AssemblyProduct("BusbarAutomation.Core")]
+[assembly: AssemblyTitle("BusbarAutomation.Reporting")]
+[assembly: AssemblyProduct("BusbarAutomation.Reporting")]
 [assembly: ComVisible(false)]
-[assembly: Guid("cc0b8c1a-2f6d-4b91-b428-a333a0a19c70")]
+[assembly: Guid("1f54a8b8-9dba-4a64-9a5a-3d174c6bf5f4")]
 
 [assembly: InternalsVisibleTo("TopToDown")]
 [assembly: InternalsVisibleTo("TopToDown.Tests")]
-[assembly: InternalsVisibleTo("BusbarAutomation.Application")]
-[assembly: InternalsVisibleTo("BusbarAutomation.Reporting")]
 
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]

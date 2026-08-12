@@ -14,7 +14,8 @@ Program
       -> Application.BusbarPlanningWorkflow     configuration + planning + preflight
       -> SolidWorksSession                       CAD session
       -> AssemblyReferencePointScanner          CAD input adapter
-      -> SolidWorksBusbarPartBuilder             CAD generation
+      -> SolidWorksBusbarBatchGenerator          CAD batch generation
+          -> SolidWorksBusbarPartBuilder         single-part CAD generation
       -> BusbarGeometryVerifier                  CAD read-only verification
       -> Reporting.ProductionReportService       report destination
           -> ProductionReportExporter            workbook generation
@@ -38,7 +39,7 @@ Program
 
 `Cli/SolidWorksGenerationRunner.cs` is the composition root because the current executable still has one SolidWorks backend. It may reference both application and CAD types. The CAD folder contains only SolidWorks operations and no longer owns the top-level workflow coordinator.
 
-`SolidWorksBusbarPartBuilder` receives only the CAD-relevant generation settings and a report sink. It no longer depends on the full `GenerationOptions` object or on the application workflow type.
+At the end of Phase 4, `SolidWorksBusbarPartBuilder` received only the CAD-relevant generation settings and a report sink. It no longer depended on the full `GenerationOptions` object or on the application workflow type. Phase 5 subsequently moved those batch settings into `SolidWorksBusbarBatchGenerator`.
 
 ## Behavior preserved
 
@@ -80,7 +81,7 @@ No route planner, feature builder, generated part, or business-rule file needs t
 
 - The application and CAD layers are still compiled into one .NET Framework executable. Physical project separation is deferred until the boundaries survive another phase.
 - `Cli.SolidWorksGenerationRunner` still contains execution-mode branching. Extracting separate command handlers now would add indirection without a second UI or backend requirement.
-- `SolidWorksBusbarPartBuilder` is still a large partial class. Phase 5 will split it by feature responsibility in small, behavior-preserving steps.
+- `SolidWorksBusbarPartBuilder` still contained batch coordination at this phase boundary. Phase 5 separates batch lifecycle from single-part construction without changing feature implementations.
 
 ## Validation record
 

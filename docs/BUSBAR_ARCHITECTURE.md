@@ -268,10 +268,11 @@ TopToDown.exe --export-report
 
 ## 14. 分阶段替换旧组件
 
-正常实体生成由 `SolidWorksBusbarPartBuilder` 和 `GeneratedComponentManager` 协作完成：
+正常实体生成由 `SolidWorksBusbarBatchGenerator`、`SolidWorksBusbarPartBuilder` 和 `GeneratedComponentManager` 协作完成：
 
 ```text
-逐根生成 SLDPRT 文件（唯一时间戳文件名）
+SolidWorksBusbarBatchGenerator 选择固定批次顺序并应用 --only 筛选
+-> 逐根调用 SolidWorksBusbarPartBuilder 生成 SLDPRT 文件（唯一时间戳文件名）
 -> 每根保存后在零件文档仍打开时，以 StagedBusbar_* 临时名称插入装配体
 -> 插入完成后关闭该零件文档，再生成下一根
 -> 对暂存组件执行尺寸、孔贯穿和双排贴合校验

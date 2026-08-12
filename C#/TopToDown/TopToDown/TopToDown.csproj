@@ -118,7 +118,8 @@
     <Compile Include="Rules\ManualPortRuleProvider.cs" />
     <Compile Include="Rules\BusbarOverlapRuleMatrix.cs" />
     <Compile Include="SolidWorks\AssemblyScanner.cs" />
-    <Compile Include="SolidWorks\BusbarBatchBuilder.cs" />
+    <Compile Include="SolidWorks\BusbarBatchGenerator.cs" />
+    <Compile Include="SolidWorks\BusbarPartBuilder.cs" />
     <Compile Include="SolidWorks\BusbarBuilderUtilities.cs" />
     <Compile Include="SolidWorks\BusbarGeometryVerifier.cs" />
     <Compile Include="SolidWorks\CadGeometryUtilities.cs" />

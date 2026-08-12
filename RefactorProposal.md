@@ -9,6 +9,7 @@ Program / GenerationOptionsParser
 -> SolidWorksGenerationRunner
 -> AssemblyReferencePointScanner
 -> BusbarPlanBuilder + Rules + Preflight
+-> SolidWorksBusbarBatchGenerator
 -> SolidWorksBusbarPartBuilder
 -> BusbarGeometryVerifier
 -> ProductionReportExporter

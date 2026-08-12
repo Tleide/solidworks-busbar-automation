@@ -5,25 +5,33 @@ using System.IO;
 using System.Linq;
 
 using BusbarAutomation.Core.Domain;
-
 using BusbarAutomation.Core.Planning;
 
 namespace BusbarAutomation.Cad.SolidWorks
 {
-    internal sealed partial class SolidWorksBusbarPartBuilder
+    internal sealed class StagedBusbarPart
+    {
+        public Busbar Busbar;
+        public string SavePath;
+        public Component2 Component;
+    }
+
+    internal sealed class SolidWorksBusbarBatchGenerator
     {
         private readonly bool _replaceExistingBusbar;
         private readonly string[] _onlyBusbarNames;
         private readonly string[] _phaseNames;
         private readonly string _neutralConductorName;
         private readonly Action<BusbarPreflightReport> _reportSink;
+        private readonly SolidWorksBusbarPartBuilder _partBuilder;
 
-        public SolidWorksBusbarPartBuilder(
+        public SolidWorksBusbarBatchGenerator(
             bool replaceExistingBusbar,
             string[] onlyBusbarNames,
             string[] phaseNames,
             string neutralConductorName,
-            Action<BusbarPreflightReport> reportSink)
+            Action<BusbarPreflightReport> reportSink,
+            SolidWorksBusbarPartBuilder partBuilder)
         {
             _replaceExistingBusbar = replaceExistingBusbar;
             _onlyBusbarNames = onlyBusbarNames == null ? null : (string[])onlyBusbarNames.Clone();
@@ -32,16 +40,10 @@ namespace BusbarAutomation.Cad.SolidWorks
                 : (string[])phaseNames.Clone();
             _neutralConductorName = neutralConductorName ?? throw new ArgumentNullException("neutralConductorName");
             _reportSink = reportSink ?? throw new ArgumentNullException("reportSink");
+            _partBuilder = partBuilder ?? throw new ArgumentNullException("partBuilder");
         }
 
-        private sealed class StagedBusbarPart
-        {
-            public Busbar Busbar;
-            public string SavePath;
-            public Component2 Component;
-        }
-
-        public List<Busbar> SelectBusbarsForSheetMetalBatch(BusbarManufacturingPlan plan)
+        public List<Busbar> SelectBusbars(BusbarManufacturingPlan plan)
         {
             if (plan == null)
                 throw new Exception("Busbar batch plan is null.");
@@ -64,7 +66,8 @@ namespace BusbarAutomation.Cad.SolidWorks
             if (_onlyBusbarNames != null && _onlyBusbarNames.Length > 0)
             {
                 selected = selected
-                    .Where(b => _onlyBusbarNames.Any(name => SameText(b.Name, name)))
+                    .Where(busbar => _onlyBusbarNames.Any(name =>
+                        string.Equals(busbar.Name, name, StringComparison.OrdinalIgnoreCase)))
                     .ToList();
 
                 if (selected.Count == 0)
@@ -80,47 +83,11 @@ namespace BusbarAutomation.Cad.SolidWorks
             return selected;
         }
 
-        private Busbar FindRequiredBusbar(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
-        {
-            string phasePrefix = "Busbar_" + phase + "_";
-
-            Busbar busbar = plan.Busbars
-                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
-
-            if (busbar == null)
-                throw new Exception("No " + kind + " busbar was planned for phase " + phase + ".");
-
-            return busbar;
-        }
-
-        private List<Busbar> FindBusbars(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
-        {
-            string phasePrefix = "Busbar_" + phase + "_";
-
-            List<Busbar> busbars = plan.Busbars
-                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (busbars.Count == 0)
-                throw new Exception("No " + kind + " busbars were planned for phase " + phase + ".");
-
-            return busbars;
-        }
-
-        private List<Busbar> FindOptionalBusbars(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
-        {
-            string phasePrefix = "Busbar_" + phase + "_";
-
-            return plan.Busbars
-                .Where(b => b.Kind == kind && b.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        public void CreateBusbarSheetMetalParts(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, List<Busbar> busbars)
+        public void Generate(
+            SldWorks swApp,
+            ModelDoc2 assemblyModel,
+            AssemblyDoc assembly,
+            List<Busbar> busbars)
         {
             if (busbars == null || busbars.Count == 0)
                 throw new Exception("No sheet metal busbars were selected for generation.");
@@ -141,9 +108,13 @@ namespace BusbarAutomation.Cad.SolidWorks
                         staged.Add(item);
 
                         // AddComponent5 is most reliable while the just-saved part
-                        // document is still open. The part is closed in the method's
-                        // finally block after insertion completes.
-                        CreateBusbarSheetMetalPart(swApp, assemblyModel, assembly, item, i + 1);
+                        // document is still open. The part builder closes it after insertion.
+                        _partBuilder.CreateStagedSheetMetalPart(
+                            swApp,
+                            assemblyModel,
+                            assembly,
+                            item,
+                            i + 1);
                     }
 
                     assemblyModel.EditRebuild3();
@@ -209,65 +180,52 @@ namespace BusbarAutomation.Cad.SolidWorks
             }
         }
 
-        private void CreateBusbarSheetMetalPart(
-            SldWorks swApp,
-            ModelDoc2 assemblyModel,
-            AssemblyDoc assembly,
-            StagedBusbarPart stagedPart,
-            int batchIndex)
+        private static Busbar FindRequiredBusbar(
+            BusbarManufacturingPlan plan,
+            string phase,
+            BusbarKind kind)
         {
-            Busbar busbar = stagedPart == null ? null : stagedPart.Busbar;
+            Busbar busbar = FindMatchingBusbars(plan, phase, kind).FirstOrDefault();
             if (busbar == null)
-                throw new Exception("Busbar sheet metal target is null.");
+                throw new Exception("No " + kind + " busbar was planned for phase " + phase + ".");
 
-            if (busbar.SheetMetalSketchLine == null || busbar.SheetMetalSketchLine.Count < 2)
-                throw new Exception("Busbar sheet metal sketch line is invalid: " + busbar.Name);
-
-            Console.WriteLine();
-            Console.WriteLine("===== Create Busbar sheet metal part =====");
-            Console.WriteLine(busbar.Name + " / " + busbar.Profile.Label + "mm");
-            Console.WriteLine(
-                "Sheet metal: MidPlane, R=" + busbar.SheetMetal.BendRadiusMm.ToString("0.###") +
-                "mm, K=" + busbar.SheetMetal.KFactor.ToString("0.###"));
-            Console.WriteLine("Sheet-metal path: " + string.Join(" -> ", busbar.SheetMetalSketchLine.Select(p => p.ToMillimeterText()).ToArray()));
-
-            ModelDoc2 partModel = null;
-            try
-            {
-                partModel = NewPartDocument(swApp);
-                SolidWorksSession.ActivateDocument(swApp, partModel);
-
-                Feature feature = null;
-                try
-                {
-                    feature = CreateBusbarSheetMetalFeature(swApp, partModel, busbar);
-                    feature.Name = busbar.Name + "_SheetMetal";
-                }
-                finally
-                {
-                    SolidWorksCom.Release(feature);
-                }
-
-                CreateBusbarMountingHoles(swApp, partModel, busbar);
-                partModel.EditRebuild3();
-                LogPartBoundingBox(partModel, busbar);
-
-                stagedPart.SavePath = SaveBusbarSheetMetalPart(partModel, assemblyModel, busbar);
-                stagedPart.Component = InsertPartIntoAssembly(
-                    swApp,
-                    assemblyModel,
-                    assembly,
-                    stagedPart.SavePath,
-                    "StagedBusbar_" + batchIndex + "_" + Guid.NewGuid().ToString("N"));
-            }
-            finally
-            {
-                if (partModel != null)
-                    CloseBusbarPartDocument(swApp, assemblyModel, partModel);
-            }
+            return busbar;
         }
 
-        private void DeleteStagedPartFiles(IEnumerable<StagedBusbarPart> staged)
+        private static List<Busbar> FindBusbars(
+            BusbarManufacturingPlan plan,
+            string phase,
+            BusbarKind kind)
+        {
+            List<Busbar> busbars = FindMatchingBusbars(plan, phase, kind);
+            if (busbars.Count == 0)
+                throw new Exception("No " + kind + " busbars were planned for phase " + phase + ".");
+
+            return busbars;
+        }
+
+        private static List<Busbar> FindOptionalBusbars(
+            BusbarManufacturingPlan plan,
+            string phase,
+            BusbarKind kind)
+        {
+            return FindMatchingBusbars(plan, phase, kind);
+        }
+
+        private static List<Busbar> FindMatchingBusbars(
+            BusbarManufacturingPlan plan,
+            string phase,
+            BusbarKind kind)
+        {
+            string phasePrefix = "Busbar_" + phase + "_";
+            return plan.Busbars
+                .Where(busbar => busbar.Kind == kind &&
+                    busbar.Name.StartsWith(phasePrefix, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(busbar => busbar.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static void DeleteStagedPartFiles(IEnumerable<StagedBusbarPart> staged)
         {
             foreach (string path in staged
                 .Where(item => !string.IsNullOrWhiteSpace(item.SavePath))
@@ -283,28 +241,6 @@ namespace BusbarAutomation.Cad.SolidWorks
                     Console.WriteLine("[Warning] Failed to delete staged part file '" + path + "': " + exception.Message);
                 }
             }
-        }
-
-        private Feature CreateBusbarSheetMetalFeature(SldWorks swApp, ModelDoc2 partModel, Busbar busbar)
-        {
-            SheetMetalOpenProfilePlane profilePlane = GetOpenProfilePlane(busbar.Name, busbar.Kind, busbar.SheetMetalSketchLine);
-            Feature sketch = null;
-            Feature feature;
-            try
-            {
-                sketch = CreateSheetMetalOpenProfileSketch(swApp, partModel, busbar, profilePlane);
-                feature = CreateSheetMetalBaseFlangeFromSelectedSketch(partModel, sketch, busbar);
-            }
-            finally
-            {
-                SolidWorksCom.Release(sketch);
-            }
-
-            if (feature == null)
-                throw new Exception("open-profile base flange creation failed: " + busbar.Name);
-
-            ApplySheetMetalParametersToCreatedFeature(partModel, busbar);
-            return feature;
         }
     }
 }

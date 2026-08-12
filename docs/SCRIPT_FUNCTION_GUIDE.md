@@ -467,19 +467,27 @@
 | `TransformPoint(...)` | 将组件局部点转换到装配体坐标，并释放本次转换创建的临时数学对象。 |
 | `SolidWorksCom.Release(...)` | 释放扫描过程中创建且不再保留的 COM 临时对象；不释放仍由后续流程使用的装配体对象。 |
 
-### `SolidWorks/BusbarBatchBuilder.cs`
+### `SolidWorks/BusbarBatchGenerator.cs`
 
-职责：选择生成顺序并批量创建铜排零件。
+职责：负责铜排批次边界，包括固定生成顺序、`--only` 筛选、暂存校验、失败清理和旧件替换。它不创建草图、钣金或孔。
 
 | 函数 | 作用 |
 | --- | --- |
-| `SelectBusbarsForSheetMetalBatch(plan)` | 选择实体生成顺序：主排、汇流排、分支排、N 排。 |
+| `SelectBusbars(plan)` | 选择实体生成顺序：ABC 主排、ABC/N 汇流排、ABC/N 分支排；`--only` 只过滤目标，不改变标准顺序。 |
 | `FindRequiredBusbar(...)` | 查找必须存在的铜排，不存在时报错。 |
 | `FindBusbars(...)` | 按相位和类型查找铜排。 |
 | `FindOptionalBusbars(...)` | 查找可选铜排，例如 N 相。 |
-| `CreateBusbarSheetMetalParts(...)` | 逐根生成并暂存插入，全部完成后执行实体校验；失败时清理本轮暂存项，通过后才交给组件管理器替换旧件。 |
-| `CreateBusbarSheetMetalPart(...)` | 生成单根铜排：建新零件、建钣金、打孔、保存，在零件文档仍打开时立即插入装配体，再在 `finally` 中关闭临时文档。这个顺序避免 `AddComponent5` 对刚关闭文件返回 `null`。 |
-| `CreateBusbarSheetMetalFeature(...)` | 创建单根铜排的钣金主体 Feature。 |
+| `Generate(...)` | 逐根调用零件构建器并暂存插入，全部完成后执行实体校验；失败时清理本轮暂存项，通过后才交给组件管理器替换旧件。 |
+| `DeleteStagedPartFiles(...)` | 暂存阶段失败时删除本轮生成的零件文件，不处理旧组件。 |
+
+### `SolidWorks/BusbarPartBuilder.cs`
+
+职责：创建单根铜排零件。批次选择、回滚和旧件替换不属于该类。
+
+| 函数 | 作用 |
+| --- | --- |
+| `CreateStagedSheetMetalPart(...)` | 建新零件、建钣金、打孔、保存，在零件文档仍打开时立即插入装配体，再在 `finally` 中关闭临时文档。这个顺序避免 `AddComponent5` 对刚关闭文件返回 `null`。 |
+| `CreateBusbarSheetMetalFeature(...)` | 从规划好的开放中心线草图创建单根铜排钣金主体 Feature。 |
 
 ### `SolidWorks/GeneratedComponentManager.cs`
 

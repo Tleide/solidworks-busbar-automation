@@ -24,7 +24,8 @@ C#/TopToDown
 │  ├─ SolidWorks
 │  │  ├─ SolidWorksSession.cs
 │  │  ├─ AssemblyScanner.cs
-│  │  ├─ BusbarBatchBuilder.cs
+│  │  ├─ BusbarBatchGenerator.cs
+│  │  ├─ BusbarPartBuilder.cs
 │  │  ├─ GeneratedComponentManager.cs
 │  │  ├─ BusbarGeometryVerifier.cs
 │  │  └─ 草图、钣金、孔、保存等实现文件
@@ -44,7 +45,7 @@ C#/TopToDown
 | `Rules` | 端口规则、搭接孔矩阵、当前手动规则 | 否 |
 | `Planning` | 设计计划、制造计划、布局、路径、拓扑、孔位、预检和螺栓计划 | 否 |
 | `Reporting` | 从 `BusbarManufacturingPlan` 导出生产与加工报表 | 否 |
-| `SolidWorks` | 扫描装配、生成钣金、打孔、保存、插入、实体校验 | 是 |
+| `SolidWorks` | 扫描装配、批次协调、单根零件建模、打孔、保存、插入、实体校验 | 是 |
 
 依赖方向：
 
@@ -57,6 +58,7 @@ Program
           -> BusbarManufacturingPlanner.Build
           -> BusbarPreflightValidator
       -> SolidWorksSession / AssemblyReferencePointScanner
+      -> SolidWorksBusbarBatchGenerator
       -> SolidWorksBusbarPartBuilder
       -> BusbarGeometryVerifier
       -> Reporting.ProductionReportService -> ProductionReportExporter
@@ -87,6 +89,8 @@ Program
 
 - `Program` 不再承载 CAD 方法，只保存默认设置并启动 Runner。
 - `Cli.SolidWorksGenerationRunner` 是当前组合根，负责连接 CLI 选项、Application 规划流程、SolidWorks 适配器和报表服务；它不是 CAD API 实现类。
+- `SolidWorksBusbarBatchGenerator` 负责固定生成顺序、`--only` 筛选、暂存校验、失败清理和旧组件替换。
+- `SolidWorksBusbarPartBuilder` 只负责单根铜排零件的草图、钣金、孔、保存和暂存插入，不保存批次选项或替换状态。
 - `Application.BusbarPlanningWorkflow` 统一配置快照、设计计划、制造计划和生成前预检，不引用 SolidWorks API。
 - `Cli.PreflightConsolePresenter` 负责预检文本展示；`BusbarPreflightReport` 只保存结构化结果，未来 UI 可直接消费。
 - `Reporting.ProductionReportService` 负责根据装配路径选择报表输出目录；`ProductionReportExporter` 只负责 workbook 内容。

@@ -23,7 +23,9 @@ Sheet Metal Base Flange MidPlane 生成钣金
 ↓
 MountingHoleBuilder 孔切除
 ↓
-暂存插入并执行真实实体校验
+SolidWorksBusbarPartBuilder 保存并暂存插入单根零件
+↓
+SolidWorksBusbarBatchGenerator 执行整批真实实体校验
 ↓
 校验通过后替换旧组件，并由 Reporting 服务导出报表
 ```
@@ -50,6 +52,8 @@ MountingHoleBuilder 孔切除
 | 钣金生成 | Sketch、宽度、厚度、R、K | Sheet Metal Feature | `SolidWorks/SheetMetalFeatureBuilder.cs` |
 | 打孔 | `MountingPorts` | Cut Feature | `SolidWorks/MountingHoleBuilder.cs` |
 | 保存装配 | 零件文档 | `SLDPRT`、装配组件 | `SolidWorks/PartPersistenceService.cs` |
+| 单根零件建模 | 单根 `Busbar` 制造计划 | 暂存零件和组件 | `SolidWorks/BusbarPartBuilder.cs` |
+| 批次生成 | 计划铜排、生成选项 | 已验证并替换的组件批次 | `SolidWorks/BusbarBatchGenerator.cs` |
 | 实体校验 | 暂存/既有组件、计划 | 尺寸/孔贯穿/贴合报告 | `SolidWorks/BusbarGeometryVerifier.cs` |
 | 组件替换 | 已通过暂存校验的新组件 | 清理后的装配体 | `SolidWorks/GeneratedComponentManager.cs` |
 | 预检展示 | 结构化预检报告 | 控制台文本 | `Cli/PreflightConsolePresenter.cs` |
@@ -72,8 +76,10 @@ flowchart TD
     J --> L["BusbarManufacturingPlanner"]
     L --> M["ContactTopologyResolver"]
     M --> N["BusbarManufacturingPlan / SheetMetalSketchLine"]
-    N --> O["SheetMetalSketchBuilder: 2D Open Profile"]
-    O --> P["SheetMetalFeatureBuilder: Base Flange MidPlane"]
+    N --> O["SolidWorksBusbarBatchGenerator: Select + Generate"]
+    O --> P0["SolidWorksBusbarPartBuilder: One Part"]
+    P0 --> P1["SheetMetalSketchBuilder: 2D Open Profile"]
+    P1 --> P["SheetMetalFeatureBuilder: Base Flange MidPlane"]
     P --> Q["MountingHoleBuilder: Hole Cuts"]
     Q --> R["PartPersistenceService: Save"]
     R --> S["Staged Insert"]

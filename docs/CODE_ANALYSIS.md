@@ -53,7 +53,8 @@
 - `SolidWorksGenerationRunner`：流程协调，不包含具体草图算法。
 - `SolidWorksSession`：连接/启动 SW，获取和激活装配体。
 - `AssemblyReferencePointScanner`：只负责参考点扫描与坐标转换。
-- `SolidWorksBusbarPartBuilder`：由多个同名 `partial` 文件组成，集中实现一根铜排零件的草图、钣金、孔、保存和批处理。这是一个有内聚性的 CAD 建模器，不再是 `partial Program`。
+- `SolidWorksBusbarBatchGenerator`：只处理批次顺序、`--only` 筛选、暂存校验、失败回滚和旧组件替换。
+- `SolidWorksBusbarPartBuilder`：由多个同名 `partial` 文件组成，只实现单根铜排零件的草图、钣金、孔、保存和暂存插入，不保存批次状态。
 - `GeneratedComponentManager`：处理暂存回滚和旧组件删除；完整生成清理全部旧件，`--only` 只按选中的铜排基名替换。
 - `BusbarGeometryVerifier`：读取实际包络、切除特征和圆柱面，验证尺寸、孔贯穿及双排贴合；每个零件只扫描一次特征树和实体面，再在内存快照中匹配多个孔。
 - `SolidWorksCom`：只释放生命周期明确的临时 COM 对象。

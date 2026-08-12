@@ -18,17 +18,20 @@ namespace BusbarAutomation.Cli
         private readonly BusbarSettings _settings;
         private readonly GenerationOptions _options;
         private readonly SolidWorksBusbarPartBuilder _partBuilder;
+        private readonly SolidWorksBusbarBatchGenerator _batchGenerator;
 
         public SolidWorksGenerationRunner(BusbarSettings settings, GenerationOptions options)
         {
             _settings = settings ?? throw new ArgumentNullException("settings");
             _options = options ?? throw new ArgumentNullException("options");
-            _partBuilder = new SolidWorksBusbarPartBuilder(
+            _partBuilder = new SolidWorksBusbarPartBuilder();
+            _batchGenerator = new SolidWorksBusbarBatchGenerator(
                 options.ReplaceExistingBusbar,
                 options.OnlyBusbarNames,
                 PhaseNames,
                 NeutralConductorName,
-                PreflightConsolePresenter.Print);
+                PreflightConsolePresenter.Print,
+                _partBuilder);
         }
 
         public void Run()
@@ -115,8 +118,8 @@ namespace BusbarAutomation.Cli
                 return;
             }
 
-            List<Busbar> busbars = _partBuilder.SelectBusbarsForSheetMetalBatch(plan);
-            _partBuilder.CreateBusbarSheetMetalParts(swApp, model, assembly, busbars);
+            List<Busbar> busbars = _batchGenerator.SelectBusbars(plan);
+            _batchGenerator.Generate(swApp, model, assembly, busbars);
 
             bool geometryPassed = true;
             if (_options.ReplaceExistingBusbar)
@@ -167,7 +170,7 @@ namespace BusbarAutomation.Cli
             BusbarManufacturingPlan plan,
             List<Busbar> expectedBusbars = null)
         {
-            List<Busbar> expected = expectedBusbars ?? _partBuilder.SelectBusbarsForSheetMetalBatch(plan);
+            List<Busbar> expected = expectedBusbars ?? _batchGenerator.SelectBusbars(plan);
             bool completePlan = _options.OnlyBusbarNames == null || _options.OnlyBusbarNames.Length == 0;
             BusbarPreflightReport geometryReport = BusbarGeometryVerifier.Verify(
                 model,

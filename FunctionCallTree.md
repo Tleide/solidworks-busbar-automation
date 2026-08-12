@@ -34,20 +34,21 @@ Program.Main(args)
    ├─ [--export-report] ProductionReportService.ExportForAssembly(...)
    ├─ [--verify-geometry] BusbarGeometryVerifier.Verify(...)
    ├─ [--preview] SolidWorksBusbarPartBuilder.CreateBusbarPreviewPart(...)
-   └─ [完整生成] SolidWorksBusbarPartBuilder.CreateBusbarSheetMetalParts(...)
-      ├─ SelectBusbarsForSheetMetalBatch(plan)
-      ├─ foreach busbar: CreateBusbarSheetMetalPart(...)
-      │  ├─ NewPartDocument(...)
-      │  ├─ CreateSheetMetalOpenProfileSketch(...)
-      │  ├─ CreateSheetMetalBaseFlangeFromSelectedSketch(...)
-      │  ├─ CreateBusbarMountingHoles(...)
-      │  ├─ SaveBusbarSheetMetalPart(...)
-      │  ├─ InsertPartIntoAssembly(..., "StagedBusbar_*")
-      │  └─ finally CloseBusbarPartDocument(...)
-      ├─ BusbarGeometryVerifier.VerifyStaged(...)
-      ├─ [失败] GeneratedComponentManager.DeleteSelected(...) + 删除本轮文件
-      ├─ [通过] 重命名暂存组件
-      └─ GeneratedComponentManager.DeleteExistingBusbars(...)
+   └─ [完整生成] SolidWorksBusbarBatchGenerator
+      ├─ SelectBusbars(plan)
+      └─ Generate(...)
+         ├─ foreach busbar: SolidWorksBusbarPartBuilder.CreateStagedSheetMetalPart(...)
+         │  ├─ NewPartDocument(...)
+         │  ├─ CreateSheetMetalOpenProfileSketch(...)
+         │  ├─ CreateSheetMetalBaseFlangeFromSelectedSketch(...)
+         │  ├─ CreateBusbarMountingHoles(...)
+         │  ├─ SaveBusbarSheetMetalPart(...)
+         │  ├─ InsertPartIntoAssembly(..., "StagedBusbar_*")
+         │  └─ finally CloseBusbarPartDocument(...)
+         ├─ BusbarGeometryVerifier.VerifyStaged(...)
+         ├─ [失败] GeneratedComponentManager.DeleteSelected(...) + 删除本轮文件
+         ├─ [通过] 重命名暂存组件
+         └─ GeneratedComponentManager.DeleteExistingBusbars(...)
    ├─ BusbarGeometryVerifier.Verify(...)
    └─ [完整且校验通过] ProductionReportService.ExportForAssembly(...)
 ```
@@ -65,7 +66,8 @@ Program.Main(args)
 | `BuildDesignPlan` | `Planning/BusbarPlanBuilder.cs` | 从标准化装配输入建立布局、逻辑路径和搭接孔。 |
 | `Build` | `Planning/BusbarManufacturingPlanner.cs` | 补齐钣金草图线、钣金参数和螺栓选型。 |
 | `ValidatePlan` | `Planning/BusbarPreflightValidator.cs` | 在 CAD 建模前检查规划契约。 |
-| `CreateBusbarSheetMetalParts` | `SolidWorks/BusbarBatchBuilder.cs` | 分阶段生成、暂存验证和替换组件。 |
+| `SelectBusbars` / `Generate` | `SolidWorks/BusbarBatchGenerator.cs` | 固定批次顺序、`--only` 筛选、分阶段生成、暂存验证和替换组件。 |
+| `CreateStagedSheetMetalPart` | `SolidWorks/BusbarPartBuilder.cs` | 创建单根零件、生成钣金与孔、保存，并在零件仍打开时暂存插入装配体。 |
 | `CreateBusbarMountingHole` | `SolidWorks/MountingHoleBuilder.cs` | 在计算出的实体表面创建定向厚度切除。 |
 | `Verify` / `VerifyStaged` | `SolidWorks/BusbarGeometryVerifier.cs` | 检查实体包络、实际圆柱孔贯穿和双排表面贴合。 |
 | `ExportForAssembly` | `Reporting/ProductionReportService.cs` | 根据装配路径选择 `Reports` 目录，再调用报表 exporter。 |

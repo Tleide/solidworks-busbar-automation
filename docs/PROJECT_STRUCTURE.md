@@ -36,7 +36,7 @@ C#/TopToDown/TopToDown.Tests
 - `Domain/EngineeringConfigurationSnapshot.cs`：单次规划使用的工程配置快照，隔离运行期间的配置变更。
 - `Domain/BusbarOverlapRuleCatalog.cs`：单次规划与预检共用的搭接孔规则目录快照。
 - `Reporting`：从制造计划导出生产与加工清单，不调用 SolidWorks API；`ProductionReportService` 处理输出目录，`ProductionReportExporter` 处理 workbook 内容。
-- `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、分阶段替换组件并校验真实实体。流程协调入口已移至 `Cli/SolidWorksGenerationRunner.cs`。
+- `SolidWorks`：连接 SW、扫描装配体、批量生成和校验真实实体。`SolidWorksBusbarBatchGenerator` 负责批次顺序、暂存校验和替换，`SolidWorksBusbarPartBuilder` 只负责单根零件建模。流程协调入口位于 `Cli/SolidWorksGenerationRunner.cs`。
 - `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
 
 当前仍是一个生产程序集 `TopToDown.exe`。目录现已映射到 `BusbarAutomation.*` 命名空间，用于显式表达依赖并为后续拆分程序集做准备；这不代表已经形成编译隔离。详细说明见 `ARCHITECTURE_MIGRATION_PHASE1.md`。
@@ -71,6 +71,7 @@ Phase 3 仍复用同一组 `Busbar` 对象，由制造规划器填入派生的�
 - `PROJECT_STRUCTURE.md`：项目结构说明。
 - `ARCHITECTURE_MIGRATION_PHASE3.md`：设计计划与制造计划的分离边界、限制和验证记录。
 - `ARCHITECTURE_MIGRATION_PHASE4.md`：Application、CLI、Reporting 和 SolidWorks 调度职责的分离及验收记录。
+- `ARCHITECTURE_MIGRATION_PHASE5.md`：SolidWorks 批次生成与单根零件建模职责的分离及验收记录。
 
 ## `SWtopToDown`
 

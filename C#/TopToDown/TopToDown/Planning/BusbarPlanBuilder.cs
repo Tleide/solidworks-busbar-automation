@@ -1,19 +1,28 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Rules;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal static class BusbarPlanBuilder
     {
         private const string NeutralConductorName = "N";
-        private static readonly string[] FuseComponentNameHints = { "fuse", "HR6", "rong", "knife", "isolator" };
-        private static readonly string[] LoubaoComponentNameHints = { "loubao", "PGM", "leakage", "breaker" };
-        public static BusbarPlan BuildPlanFromScannedAssembly(List<FoundPoint> foundPoints, string[] phaseNames, BusbarSettings settings)
+        public static BusbarPlan BuildPlan(
+            AssemblySnapshot assembly,
+            string[] phaseNames,
+            EngineeringConfigurationSnapshot configuration)
         {
-            if (foundPoints == null || foundPoints.Count == 0)
-                throw new Exception("No reference points were scanned from the active assembly.");
+            if (assembly == null)
+                throw new ArgumentNullException("assembly");
+
+            if (configuration == null)
+                throw new ArgumentNullException("configuration");
+
+            BusbarSettings settings = configuration.ToPlanningSettings();
 
             ManualBusbarRuleSet rules = ManualBusbarRuleSet.CreateDefault(
                 CabinetTopologyKind.TypicalDesign,
@@ -22,10 +31,11 @@ namespace SwFeatureDebug
             CollectorLayoutPlanner collectorPlanner = new CollectorLayoutPlanner(rules, settings);
             BusbarRoutePlanner routePlanner = new BusbarRoutePlanner(settings);
             ContactTopologyResolver topology = new ContactTopologyResolver();
-            BusbarOverlapHolePlanner overlapHolePlanner = new BusbarOverlapHolePlanner();
+            BusbarOverlapHolePlanner overlapHolePlanner =
+                new BusbarOverlapHolePlanner(configuration.OverlapRules);
 
-            string fuseComponent = FindFuseComponent(foundPoints, phaseNames);
-            List<LoubaoGroup> loubaos = FindLoubaoGroups(foundPoints, phaseNames, fuseComponent, settings);
+            string fuseComponent = assembly.Fuse.SourceComponentName;
+            List<LoubaoGroup> loubaos = CreateLoubaoGroups(assembly.Breakers, settings);
 
             if (loubaos.Count == 0)
                 throw new Exception("No loubao components were found for planning.");
@@ -40,11 +50,23 @@ namespace SwFeatureDebug
             for (int phaseIndex = 0; phaseIndex < phaseNames.Length; phaseIndex++)
             {
                 string phase = phaseNames[phaseIndex];
-                FoundPoint fuseOutPoint = FindRequiredPoint(foundPoints, fuseComponent, phase + "_OUT");
-                ConnectionPort fuseOut = portRules.CreateFuseOutPort(phase, fuseOutPoint);
+                AssemblyPortSnapshot fuseOutPoint = assembly.Fuse.GetRequiredPort(phase + "_OUT");
+                ConnectionPort fuseOut = portRules.CreateFuseOutPort(
+                    phase,
+                    fuseComponent,
+                    fuseOutPoint.Position);
 
                 List<ConnectionPort> loubaoInputs = loubaos
-                    .Select((l, i) => portRules.CreateLoubaoInPort(phase, i + 1, FindRequiredPoint(foundPoints, l.ComponentName, phase + "_IN")))
+                    .Select((l, i) =>
+                    {
+                        AssemblyDeviceSnapshot device = FindBreaker(assembly, l.ComponentName);
+                        AssemblyPortSnapshot port = device.GetRequiredPort(phase + "_IN");
+                        return portRules.CreateLoubaoInPort(
+                            phase,
+                            i + 1,
+                            device.SourceComponentName,
+                            port.Position);
+                    })
                     .OrderBy(p => p.HoleCenter.X)
                     .ToList();
                 ApplyBranchDevicePortRules(loubaoInputs, rules);
@@ -112,13 +134,14 @@ namespace SwFeatureDebug
 
             AddNeutralCollectorAndBranches(
                 plan,
-                foundPoints,
+                assembly,
                 loubaos,
                 phaseNames.Length,
                 portRules,
                 collectorPlanner,
                 routePlanner,
                 topology,
+                overlapHolePlanner,
                 rules,
                 settings);
 
@@ -129,17 +152,18 @@ namespace SwFeatureDebug
 
         private static void AddNeutralCollectorAndBranches(
             BusbarPlan plan,
-            List<FoundPoint> foundPoints,
+            AssemblySnapshot assembly,
             List<LoubaoGroup> loubaos,
             int neutralPhaseIndex,
             ManualPortRuleProvider portRules,
             CollectorLayoutPlanner collectorPlanner,
             BusbarRoutePlanner routePlanner,
             ContactTopologyResolver topology,
+            BusbarOverlapHolePlanner overlapHolePlanner,
             ManualBusbarRuleSet rules,
             BusbarSettings settings)
         {
-            List<ConnectionPort> neutralInputs = CreateNeutralLoubaoInputs(foundPoints, loubaos, portRules);
+            List<ConnectionPort> neutralInputs = CreateNeutralLoubaoInputs(assembly, loubaos, portRules);
             if (neutralInputs.Count == 0)
             {
                 Console.WriteLine("No N_IN reference points were found. Skip neutral collector and neutral branch busbars.");
@@ -148,8 +172,6 @@ namespace SwFeatureDebug
 
             foreach (ConnectionPort neutralInput in neutralInputs)
                 neutralInput.HoleDiameterMm = rules.NeutralBranchStartHoleDiameterMm;
-
-            BusbarOverlapHolePlanner overlapHolePlanner = new BusbarOverlapHolePlanner();
 
             CollectorLayout neutralCollector = collectorPlanner.CreateLayout(
                 NeutralConductorName,
@@ -193,7 +215,7 @@ namespace SwFeatureDebug
         }
 
         private static List<ConnectionPort> CreateNeutralLoubaoInputs(
-            List<FoundPoint> foundPoints,
+            AssemblySnapshot assembly,
             List<LoubaoGroup> loubaos,
             ManualPortRuleProvider portRules)
         {
@@ -202,16 +224,19 @@ namespace SwFeatureDebug
 
             for (int i = 0; i < loubaos.Count; i++)
             {
-                FoundPoint neutralPoint = foundPoints.FirstOrDefault(p =>
-                    SameText(p.ComponentName, loubaos[i].ComponentName) &&
-                    SameText(p.PointName, NeutralConductorName + "_IN"));
-                if (neutralPoint == null)
+                AssemblyDeviceSnapshot device = FindBreaker(assembly, loubaos[i].ComponentName);
+                AssemblyPortSnapshot neutralPoint;
+                if (!device.TryGetPort(NeutralConductorName + "_IN", out neutralPoint))
                 {
                     missingComponents.Add(loubaos[i].ComponentName);
                     continue;
                 }
 
-                ports.Add(portRules.CreateLoubaoInPort(NeutralConductorName, i + 1, neutralPoint));
+                ports.Add(portRules.CreateLoubaoInPort(
+                    NeutralConductorName,
+                    i + 1,
+                    device.SourceComponentName,
+                    neutralPoint.Position));
             }
 
             if (ports.Count > 0 && missingComponents.Count > 0)
@@ -568,76 +593,40 @@ namespace SwFeatureDebug
             return value * 1000.0;
         }
 
-        internal static string FindFuseComponent(List<FoundPoint> foundPoints, string[] phaseNames)
-        {
-            var candidates = foundPoints
-                .GroupBy(p => p.ComponentName)
-                .Select(g => new
-                {
-                    ComponentName = g.Key,
-                    OutCount = phaseNames.Count(phase => g.Any(p => SameText(p.PointName, phase + "_OUT"))),
-                    NameScore = ScoreNameHint(g.Key, FuseComponentNameHints) -
-                        ScoreNameHint(g.Key, LoubaoComponentNameHints)
-                })
-                .Where(x => x.OutCount == phaseNames.Length && x.NameScore > 0)
-                .ToList();
-
-            if (candidates.Count == 0)
-            {
-                throw new Exception(
-                    "No component has complete phase OUT points and a recognized fuse name. " +
-                    "Use a standard fuse component name or update FuseComponentNameHints.");
-            }
-
-            if (candidates.Count > 1)
-            {
-                throw new Exception(
-                    "Multiple components have complete phase OUT points and a recognized fuse name: " +
-                    string.Join(", ", candidates.Select(candidate => candidate.ComponentName).ToArray()) +
-                    ". Keep exactly one fuse component or make the component contract explicit.");
-            }
-
-            return candidates[0].ComponentName;
-        }
-
-        private static List<LoubaoGroup> FindLoubaoGroups(
-            List<FoundPoint> foundPoints,
-            string[] phaseNames,
-            string fuseComponent,
+        private static List<LoubaoGroup> CreateLoubaoGroups(
+            IEnumerable<AssemblyDeviceSnapshot> breakers,
             BusbarSettings settings)
         {
-            return foundPoints
-                .GroupBy(p => p.ComponentName)
-                .Where(g => !SameText(g.Key, fuseComponent))
-                .Where(g => phaseNames.All(phase => g.Any(p => SameText(p.PointName, phase + "_IN"))))
-                .Where(g => ScoreNameHint(g.Key, FuseComponentNameHints) <= ScoreNameHint(g.Key, LoubaoComponentNameHints))
-                .Select(group => CreateLoubaoGroup(
-                    group,
-                    settings.PhaseBranchRules,
-                    settings.NeutralBranchRules))
-                .OrderBy(g => g.CenterX)
+            return breakers
+                .Select(device => CreateLoubaoGroup(device, settings.PhaseBranchRules, settings.NeutralBranchRules))
+                .OrderBy(group => group.CenterX)
                 .ToList();
         }
 
         private static LoubaoGroup CreateLoubaoGroup(
-            IGrouping<string, FoundPoint> componentPoints,
+            AssemblyDeviceSnapshot device,
             List<BranchBusbarRule> phaseRules,
             List<BranchBusbarRule> neutralRules)
         {
+            if (!device.RatedCurrentA.HasValue)
+                throw new Exception("Loubao rated current is missing: " + device.SourceComponentName);
+
             BranchBusbarRule phaseRule = ResolveBranchRule(
-                componentPoints.Key,
+                device.SourceComponentName,
+                device.RatedCurrentA.Value,
                 phaseRules,
                 "phase branch");
             BranchBusbarRule neutralRule = ResolveBranchRule(
-                componentPoints.Key,
+                device.SourceComponentName,
+                device.RatedCurrentA.Value,
                 neutralRules,
                 "neutral branch");
             return new LoubaoGroup
             {
-                ComponentName = componentPoints.Key,
-                CenterX = componentPoints
-                    .Where(point => point.PointName.EndsWith("_IN", StringComparison.OrdinalIgnoreCase))
-                    .Average(point => point.Position.X),
+                ComponentName = device.SourceComponentName,
+                CenterX = device.Ports
+                    .Where(port => port.Name.EndsWith("_IN", StringComparison.OrdinalIgnoreCase))
+                    .Average(port => port.Position.X),
                 RatedCurrentA = phaseRule.RatedCurrentA,
                 BranchProfile = phaseRule.Profile,
                 BranchArrangement = phaseRule.Arrangement,
@@ -657,10 +646,10 @@ namespace SwFeatureDebug
 
         private static BranchBusbarRule ResolveBranchRule(
             string componentName,
+            int ratedCurrentA,
             List<BranchBusbarRule> rules,
             string ruleSetName)
         {
-            int ratedCurrentA = ParseRatedCurrentA(componentName, rules);
             BranchBusbarRule rule = rules.FirstOrDefault(candidate => candidate.RatedCurrentA == ratedCurrentA);
             if (rule == null || rule.Profile == null)
                 throw new Exception("No " + ruleSetName + " busbar rule was found for " + ratedCurrentA + "A: " + componentName);
@@ -671,65 +660,16 @@ namespace SwFeatureDebug
             return rule;
         }
 
-        private static int ParseRatedCurrentA(string componentName, List<BranchBusbarRule> rules)
+        private static AssemblyDeviceSnapshot FindBreaker(
+            AssemblySnapshot assembly,
+            string componentName)
         {
-            if (string.IsNullOrWhiteSpace(componentName))
-                throw new Exception("Cannot parse rated current from an empty loubao component name.");
+            AssemblyDeviceSnapshot device = assembly.Breakers.FirstOrDefault(
+                candidate => SameText(candidate.SourceComponentName, componentName));
+            if (device == null)
+                throw new Exception("No assembly device was found for component: " + componentName);
 
-            if (rules == null || rules.Count == 0)
-                throw new Exception("Branch busbar rules are not configured.");
-
-            List<int> matchedCurrents = rules
-                .Select(rule => rule.RatedCurrentA)
-                .Distinct()
-                .Where(current => Regex.IsMatch(
-                    componentName,
-                    @"(?<![A-Za-z0-9])" + current + @"(?:A)?(?![A-Za-z0-9])",
-                    RegexOptions.IgnoreCase))
-                .ToList();
-
-            if (matchedCurrents.Count != 1)
-            {
-                throw new Exception(
-                    "Loubao component name must contain exactly one configured rated-current token. " +
-                    "Component=" + componentName + ", supported=" +
-                    string.Join("A, ", rules.Select(rule => rule.RatedCurrentA).Distinct().OrderBy(current => current).ToArray()) +
-                    "A.");
-            }
-
-            return matchedCurrents[0];
-        }
-
-        private static FoundPoint FindRequiredPoint(List<FoundPoint> points, string componentName, string pointName)
-        {
-            List<FoundPoint> matches = points
-                .Where(point => SameText(point.ComponentName, componentName) && SameText(point.PointName, pointName))
-                .ToList();
-            if (matches.Count == 0)
-                throw new Exception("Missing reference point: " + componentName + "." + pointName);
-
-            if (matches.Count > 1)
-                throw new Exception("Duplicate reference point: " + componentName + "." + pointName);
-
-            return matches[0];
-        }
-
-        private static int ScoreNameHint(string componentName, string[] hints)
-        {
-            if (string.IsNullOrWhiteSpace(componentName))
-                return 0;
-
-            int score = 0;
-            foreach (string hint in hints)
-            {
-                if (!string.IsNullOrWhiteSpace(hint) &&
-                    componentName.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    score++;
-                }
-            }
-
-            return score;
+            return device;
         }
 
         private static bool SameText(string left, string right)

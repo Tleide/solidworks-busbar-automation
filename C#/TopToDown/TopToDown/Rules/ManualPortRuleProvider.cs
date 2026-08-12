@@ -1,6 +1,8 @@
 using System;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Core.Rules
 {
     internal class ManualPortRuleProvider
     {
@@ -11,11 +13,12 @@ namespace SwFeatureDebug
             _rules = rules;
         }
 
-        public ConnectionPort CreateFuseOutPort(string phase, FoundPoint point)
+        public ConnectionPort CreateFuseOutPort(string phase, string componentName, Point3 position)
         {
             ConnectionPort port = CreateDevicePort(
                 "Fuse " + phase + "_OUT",
-                point,
+                componentName,
+                position,
                 PortKind.FuseOut,
                 _rules.GetFuseOutFace(),
                 AxisDirection.Y,
@@ -26,11 +29,16 @@ namespace SwFeatureDebug
             return port;
         }
 
-        public ConnectionPort CreateLoubaoInPort(string phase, int index, FoundPoint point)
+        public ConnectionPort CreateLoubaoInPort(
+            string phase,
+            int index,
+            string componentName,
+            Point3 position)
         {
             return CreateDevicePort(
                 "Loubao " + phase + "_IN " + index,
-                point,
+                componentName,
+                position,
                 PortKind.LoubaoIn,
                 _rules.GetLoubaoInFace(),
                 AxisDirection.Y,
@@ -55,7 +63,8 @@ namespace SwFeatureDebug
 
         private ConnectionPort CreateDevicePort(
             string name,
-            FoundPoint point,
+            string componentName,
+            Point3 position,
             PortKind kind,
             ContactFace face,
             AxisDirection leadAxis,
@@ -64,9 +73,9 @@ namespace SwFeatureDebug
             return new ConnectionPort
             {
                 Name = name,
-                ComponentName = point.ComponentName,
+                ComponentName = componentName,
                 Kind = kind,
-                HoleCenter = point.Position,
+                HoleCenter = position,
                 RequiredFace = face,
                 PreferredLeadAxis = leadAxis,
                 PreferredLeadSign = leadSign,

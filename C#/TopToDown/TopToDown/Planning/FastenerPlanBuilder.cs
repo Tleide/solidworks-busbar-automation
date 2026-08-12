@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal static class FastenerPlanBuilder
     {

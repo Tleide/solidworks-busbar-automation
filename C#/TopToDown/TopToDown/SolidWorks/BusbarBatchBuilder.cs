@@ -4,7 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Application;
+
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Planning;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {

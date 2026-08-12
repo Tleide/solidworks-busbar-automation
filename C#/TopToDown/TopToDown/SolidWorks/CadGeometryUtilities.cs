@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {

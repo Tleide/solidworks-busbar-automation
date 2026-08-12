@@ -10,6 +10,7 @@
 C#/TopToDown/TopToDown
 ├─ Program.cs
 ├─ App
+├─ Cli
 ├─ Domain
 ├─ Planning
 ├─ Rules
@@ -25,13 +26,20 @@ C#/TopToDown/TopToDown.Tests
 核心职责：
 
 - `Program.cs`：默认工程参数和进程级异常边界。
-- `App`：严格命令行解析和入口辅助方法。
+- `App`：可被 CLI/UI 共用的运行选项契约。
+- `App/AssemblySnapshotFactory.cs`：将 SolidWorks 扫描点识别为标准化设备输入；组件名称识别和额定电流解析集中在此边界。
+- `Cli`：严格命令行解析；与 `Program.cs` 一起构成当前命令行入口。
 - `Domain`：铜排业务模型、端口、点、规格、孔型、枚举。
 - `Rules`：当前默认规则、端口规则和搭接孔矩阵。
 - `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿、搭接孔位、螺栓计划和预检。
+- `Domain/AssemblySnapshot.cs`：规划层使用的装配输入快照，包含设备、额定电流、端口和装配坐标。
+- `Domain/EngineeringConfigurationSnapshot.cs`：单次规划使用的工程配置快照，隔离运行期间的配置变更。
+- `Domain/BusbarOverlapRuleCatalog.cs`：单次规划与预检共用的搭接孔规则目录快照。
 - `Reporting`：从 `BusbarPlan` 导出生产与加工清单。
 - `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、分阶段替换组件并校验真实实体。
 - `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
+
+当前仍是一个生产程序集 `TopToDown.exe`。目录现已映射到 `BusbarAutomation.*` 命名空间，用于显式表达依赖并为后续拆分程序集做准备；这不代表已经形成编译隔离。详细说明见 `ARCHITECTURE_MIGRATION_PHASE1.md`。
 
 当前只有 SolidWorks 一个 CAD 后端，未被使用的 `CadAbstractions` 已删除。未来接入 UG/NXOpen 时，应先复用 `Domain/Rules/Planning`，再根据真实的第二后端需求提取最小接口。
 

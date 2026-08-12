@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal class MainFeedRouteDecision
     {

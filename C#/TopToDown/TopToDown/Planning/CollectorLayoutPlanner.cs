@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Rules;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal class CollectorLayoutPlanner
     {

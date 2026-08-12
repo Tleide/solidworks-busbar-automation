@@ -2,7 +2,9 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using System;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {
@@ -74,7 +76,18 @@ namespace SwFeatureDebug
                         : port.HoleCenter;
                     Point3 sketchCenter = FlattenSketchPoint(ModelPointToSketchPoint(mathUtility, holeCenter, modelToSketch));
                     double radius = Mm(port.HoleDiameterMm) / 2.0;
-                    SketchSegment circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
+                    bool previousAddToDb = sketchManager.AddToDB;
+                    SketchSegment circle;
+                    try
+                    {
+                        sketchManager.AddToDB = true;
+                        circle = sketchManager.CreateCircleByRadius(sketchCenter.X, sketchCenter.Y, 0.0, radius);
+                    }
+                    finally
+                    {
+                        sketchManager.AddToDB = previousAddToDb;
+                    }
+
                     if (circle == null)
                         throw new Exception("Failed to create mounting hole circle: " + busbar.Name + " " + role);
                     SolidWorksCom.Release(circle);

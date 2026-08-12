@@ -1,10 +1,21 @@
 using System;
 using System.Collections.Generic;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Rules;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal class BusbarOverlapHolePlanner
     {
+        private readonly BusbarOverlapRuleCatalog _rules;
+
+        public BusbarOverlapHolePlanner(BusbarOverlapRuleCatalog rules)
+        {
+            _rules = rules ?? throw new ArgumentNullException("rules");
+        }
+
         public List<ConnectionPort> CreateCollectorOverlapPorts(
             ConnectionPort centerPort,
             Busbar connectedBusbar,
@@ -21,7 +32,7 @@ namespace SwFeatureDebug
                 throw new Exception("Overlap hole planning requires a collector profile.");
 
             BusbarOverlapHoleRule rule;
-            if (!BusbarOverlapRuleMatrix.TryResolve(connectedBusbar.Profile.WidthMm, collectorProfile.WidthMm, out rule))
+            if (!_rules.TryResolve(connectedBusbar.Profile.WidthMm, collectorProfile.WidthMm, out rule))
             {
                 throw new InvalidOperationException(
                     "No approved overlap hole rule exists for " +

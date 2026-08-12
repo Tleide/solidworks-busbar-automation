@@ -1,6 +1,6 @@
 using System;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {

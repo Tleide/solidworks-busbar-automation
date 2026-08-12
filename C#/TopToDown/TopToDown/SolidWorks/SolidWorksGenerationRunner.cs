@@ -3,7 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Application;
+
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Planning;
+
+using BusbarAutomation.Reporting;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed class SolidWorksGenerationRunner
     {
@@ -31,6 +39,10 @@ namespace SwFeatureDebug
                 return;
             }
 
+            EngineeringConfigurationSnapshot configuration =
+                EngineeringConfigurationSnapshot.FromSettings(_settings);
+            BusbarSettings planningSettings = configuration.ToPlanningSettings();
+
             SldWorks swApp;
             ModelDoc2 model;
             AssemblyDoc assembly;
@@ -53,7 +65,12 @@ namespace SwFeatureDebug
             BusbarPlan plan;
             try
             {
-                plan = BusbarPlanBuilder.BuildPlanFromScannedAssembly(scannedPoints, PhaseNames, _settings);
+                AssemblySnapshot assemblySnapshot = AssemblySnapshotFactory.FromFoundPoints(
+                    scannedPoints,
+                    PhaseNames,
+                    configuration.GetSupportedRatedCurrents(),
+                    model.GetPathName());
+                plan = BusbarPlanBuilder.BuildPlan(assemblySnapshot, PhaseNames, configuration);
             }
             catch (Exception exception)
             {
@@ -63,7 +80,11 @@ namespace SwFeatureDebug
                 return;
             }
 
-            BusbarPreflightReport planReport = BusbarPreflightValidator.ValidatePlan(plan, _settings, PhaseNames);
+            BusbarPreflightReport planReport = BusbarPreflightValidator.ValidatePlan(
+                plan,
+                planningSettings,
+                PhaseNames,
+                configuration.OverlapRules);
             planReport.Messages.InsertRange(0, configurationReport.Messages);
             planReport.PrintToConsole();
 

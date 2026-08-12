@@ -1,6 +1,6 @@
 using System;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Domain
 {
     internal class SheetMetalOpenProfilePlane
     {

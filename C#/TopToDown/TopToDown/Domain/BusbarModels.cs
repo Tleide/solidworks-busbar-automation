@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
+using BusbarAutomation.Core.Rules;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Domain
 {
     internal class SheetMetalOptions
     {

@@ -1,61 +1,45 @@
-using System;
 using System.Collections.Generic;
+using BusbarAutomation.Core.Domain;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Rules
 {
     internal static class BusbarOverlapRuleMatrix
     {
-        private const double WidthToleranceMm = 0.01;
         // Mirrored from the workbook overlap matrix. Keep the workbook as the human-editable source.
-        private static readonly Dictionary<string, BusbarOverlapHoleRule> Rules = CreateRules();
+        private static readonly List<BusbarOverlapRuleEntry> Entries = CreateEntries();
+        private static readonly BusbarOverlapRuleCatalog Catalog = new BusbarOverlapRuleCatalog(Entries);
 
         public static bool TryResolve(double firstWidthMm, double secondWidthMm, out BusbarOverlapHoleRule rule)
         {
-            int first;
-            int second;
-            if (!TryNormalizeWidth(firstWidthMm, out first) || !TryNormalizeWidth(secondWidthMm, out second))
-            {
-                rule = null;
-                return false;
-            }
-            string key = MakeKey(first, second);
-
-            BusbarOverlapHoleRule found;
-            if (Rules.TryGetValue(key, out found))
-            {
-                rule = found.Clone();
-                return true;
-            }
-
-            rule = null;
-            return false;
+            return Catalog.TryResolve(firstWidthMm, secondWidthMm, out rule);
         }
 
-        private static Dictionary<string, BusbarOverlapHoleRule> CreateRules()
+        public static BusbarOverlapRuleCatalog CreateCatalog()
         {
-            Dictionary<string, BusbarOverlapHoleRule> rules = new Dictionary<string, BusbarOverlapHoleRule>();
+            return new BusbarOverlapRuleCatalog(Entries);
+        }
 
-            Add(rules, 30, 30, Single(11.0, "single-11"));
-            Add(rules, 30, 40, Single(13.0, "single-13"));
-            Add(rules, 30, 50, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 30, 60, StraightDouble(11.0, "straight-double-11"));
-
-            Add(rules, 40, 30, Single(13.0, "single-13"));
-            Add(rules, 40, 40, Single(13.0, "single-13"));
-            Add(rules, 40, 50, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 40, 60, StraightDouble(11.0, "straight-double-11"));
-
-            Add(rules, 50, 30, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 50, 40, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 50, 50, DiagonalDouble(13.0, 11.0, "diagonal-double-13-offset-11"));
-            Add(rules, 50, 60, StraightDouble(11.0, "straight-double-11"));
-
-            Add(rules, 60, 30, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 60, 40, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 60, 50, StraightDouble(11.0, "straight-double-11"));
-            Add(rules, 60, 60, DiagonalDouble(13.0, 12.0, "diagonal-double-13-offset-12"));
-
-            return rules;
+        private static List<BusbarOverlapRuleEntry> CreateEntries()
+        {
+            return new List<BusbarOverlapRuleEntry>
+            {
+                Entry(30, 30, Single(11.0, "single-11")),
+                Entry(30, 40, Single(13.0, "single-13")),
+                Entry(30, 50, StraightDouble(11.0, "straight-double-11")),
+                Entry(30, 60, StraightDouble(11.0, "straight-double-11")),
+                Entry(40, 30, Single(13.0, "single-13")),
+                Entry(40, 40, Single(13.0, "single-13")),
+                Entry(40, 50, StraightDouble(11.0, "straight-double-11")),
+                Entry(40, 60, StraightDouble(11.0, "straight-double-11")),
+                Entry(50, 30, StraightDouble(11.0, "straight-double-11")),
+                Entry(50, 40, StraightDouble(11.0, "straight-double-11")),
+                Entry(50, 50, DiagonalDouble(13.0, 11.0, "diagonal-double-13-offset-11")),
+                Entry(50, 60, StraightDouble(11.0, "straight-double-11")),
+                Entry(60, 30, StraightDouble(11.0, "straight-double-11")),
+                Entry(60, 40, StraightDouble(11.0, "straight-double-11")),
+                Entry(60, 50, StraightDouble(11.0, "straight-double-11")),
+                Entry(60, 60, DiagonalDouble(13.0, 12.0, "diagonal-double-13-offset-12"))
+            };
         }
 
         private static BusbarOverlapHoleRule Single(double diameterMm, string sourceCode)
@@ -73,20 +57,13 @@ namespace SwFeatureDebug
             return new BusbarOverlapHoleRule(BusbarOverlapHolePattern.DiagonalDouble, diameterMm, offsetMm, sourceCode);
         }
 
-        private static void Add(Dictionary<string, BusbarOverlapHoleRule> rules, int firstWidthMm, int secondWidthMm, BusbarOverlapHoleRule rule)
+        private static BusbarOverlapRuleEntry Entry(
+            double firstWidthMm,
+            double secondWidthMm,
+            BusbarOverlapHoleRule rule)
         {
-            rules[MakeKey(firstWidthMm, secondWidthMm)] = rule;
+            return new BusbarOverlapRuleEntry(firstWidthMm, secondWidthMm, rule);
         }
 
-        private static string MakeKey(int firstWidthMm, int secondWidthMm)
-        {
-            return firstWidthMm.ToString() + "x" + secondWidthMm.ToString();
-        }
-
-        private static bool TryNormalizeWidth(double widthMm, out int normalizedWidthMm)
-        {
-            normalizedWidthMm = (int)Math.Round(widthMm, 0, MidpointRounding.AwayFromZero);
-            return Math.Abs(widthMm - normalizedWidthMm) <= WidthToleranceMm;
-        }
     }
 }

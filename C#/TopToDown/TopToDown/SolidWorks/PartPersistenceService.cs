@@ -3,7 +3,9 @@ using SolidWorks.Interop.swconst;
 using System;
 using System.IO;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {

@@ -1,6 +1,7 @@
 using System;
+using BusbarAutomation.Core.Domain;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Rules
 {
     internal class ManualBusbarRuleSet
     {

@@ -1,19 +1,11 @@
 using System;
 using System.Collections.Generic;
+using BusbarAutomation.Application;
+using BusbarAutomation.Cad.SolidWorks;
+using BusbarAutomation.Core.Domain;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Cli
 {
-    internal sealed class GenerationOptions
-    {
-        public bool ReplaceExistingBusbar = true;
-        public bool VerboseFeatureScan;
-        public bool PreviewOnly;
-        public bool ValidateOnly;
-        public bool VerifyGeometryOnly;
-        public bool ExportReportOnly;
-        public string[] OnlyBusbarNames;
-    }
-
     internal static class Program
     {
         private static readonly BusbarSettings Settings = new BusbarSettings

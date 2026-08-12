@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Domain
 {
     internal class BusbarSettings
     {

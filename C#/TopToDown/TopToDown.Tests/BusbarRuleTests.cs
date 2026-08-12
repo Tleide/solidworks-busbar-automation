@@ -1,7 +1,19 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Collections.Generic;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Application;
+
+using BusbarAutomation.Cad.SolidWorks;
+
+using BusbarAutomation.Cli;
+
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Planning;
+
+using BusbarAutomation.Core.Rules;
+
+namespace BusbarAutomation.Tests
 {
     [TestClass]
     public class GenerationOptionsParserTests
@@ -121,9 +133,12 @@ namespace SwFeatureDebug
             AddPhasePoints(points, "HR6-630-1", includeInputs: true);
             AddPhasePoints(points, "PGM8LZ-400-1", includeInputs: true);
 
-            string component = BusbarPlanBuilder.FindFuseComponent(points, new[] { "A", "B", "C" });
+            AssemblySnapshot snapshot = AssemblySnapshotFactory.FromFoundPoints(
+                points,
+                new[] { "A", "B", "C" },
+                new[] { 400 });
 
-            Assert.AreEqual("HR6-630-1", component);
+            Assert.AreEqual("HR6-630-1", snapshot.Fuse.SourceComponentName);
         }
 
         [TestMethod]
@@ -134,7 +149,10 @@ namespace SwFeatureDebug
             AddPhasePoints(points, "fuse-backup-1", includeInputs: false);
 
             Assert.ThrowsException<System.Exception>(() =>
-                BusbarPlanBuilder.FindFuseComponent(points, new[] { "A", "B", "C" }));
+                AssemblySnapshotFactory.FromFoundPoints(
+                    points,
+                    new[] { "A", "B", "C" },
+                    new[] { 400 }));
         }
 
         private static void AddPhasePoints(List<FoundPoint> points, string componentName, bool includeInputs)

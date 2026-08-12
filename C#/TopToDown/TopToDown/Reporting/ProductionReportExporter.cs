@@ -7,7 +7,9 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+namespace BusbarAutomation.Reporting
 {
     // Produces a CAD-independent production report from the planning model.
     // It intentionally uses the planned sheet-metal route, not the generated SolidWorks body.

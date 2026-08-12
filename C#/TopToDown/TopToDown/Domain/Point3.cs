@@ -1,6 +1,6 @@
 using System;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Core.Domain
 {
     // Geometry coordinates use meters to match the SolidWorks API. Rule/configuration values use explicit *Mm names.
     internal struct Point3

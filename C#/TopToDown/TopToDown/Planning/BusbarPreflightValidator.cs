@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+using BusbarAutomation.Core.Rules;
+
+namespace BusbarAutomation.Core.Planning
 {
     internal enum PreflightSeverity
     {
@@ -150,7 +153,8 @@ namespace SwFeatureDebug
         public static BusbarPreflightReport ValidatePlan(
             BusbarPlan plan,
             BusbarSettings settings,
-            string[] phaseNames)
+            string[] phaseNames,
+            BusbarOverlapRuleCatalog overlapRules)
         {
             BusbarPreflightReport report = new BusbarPreflightReport();
 
@@ -181,7 +185,7 @@ namespace SwFeatureDebug
             ValidateLoubaoSelections(report, plan, settings);
             ValidateCollectors(report, plan, settings, phaseNames);
             ValidateBranchTopology(report, plan, settings, phaseNames);
-            ValidateOverlapRulesAndPorts(report, plan, phaseNames);
+            ValidateOverlapRulesAndPorts(report, plan, phaseNames, overlapRules);
             ValidateDoubleClampRoutes(report, plan, settings, phaseNames);
             ValidateFastenerJoints(report, plan);
 
@@ -548,8 +552,15 @@ namespace SwFeatureDebug
         private static void ValidateOverlapRulesAndPorts(
             BusbarPreflightReport report,
             BusbarPlan plan,
-            string[] phaseNames)
+            string[] phaseNames,
+            BusbarOverlapRuleCatalog overlapRules)
         {
+            if (overlapRules == null)
+            {
+                report.AddError("Overlap", "Overlap-hole rules are not configured.");
+                return;
+            }
+
             foreach (string phase in GetAllPhases(phaseNames))
             {
                 Busbar collector = FindBusbar(plan, "Busbar_" + phase + "_Collector");
@@ -563,7 +574,7 @@ namespace SwFeatureDebug
 
                     BusbarOverlapHoleRule rule;
                     string scope = "Overlap/" + branch.Name;
-                    if (!BusbarOverlapRuleMatrix.TryResolve(branch.Profile.WidthMm, collector.Profile.WidthMm, out rule))
+                    if (!overlapRules.TryResolve(branch.Profile.WidthMm, collector.Profile.WidthMm, out rule))
                     {
                         report.AddError(
                             scope,

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal static class SolidWorksCom
     {

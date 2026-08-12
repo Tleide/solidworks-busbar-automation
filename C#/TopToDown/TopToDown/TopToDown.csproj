@@ -6,7 +6,7 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{F2F93F6A-628C-4473-8C0D-6C8CD255DF3B}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>TopToDown</RootNamespace>
+    <RootNamespace>BusbarAutomation</RootNamespace>
     <AssemblyName>TopToDown</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
@@ -79,8 +79,13 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="App\GenerationOptionsParser.cs" />
+    <Compile Include="App\AssemblySnapshotFactory.cs" />
+    <Compile Include="App\GenerationOptions.cs" />
+    <Compile Include="Cli\GenerationOptionsParser.cs" />
     <Compile Include="Domain\BusbarGenerationSettings.cs" />
+    <Compile Include="Domain\AssemblySnapshot.cs" />
+    <Compile Include="Domain\BusbarOverlapRuleCatalog.cs" />
+    <Compile Include="Domain\EngineeringConfigurationSnapshot.cs" />
     <Compile Include="Domain\BranchBusbarRule.cs" />
     <Compile Include="Domain\BusbarHoleModels.cs" />
     <Compile Include="Domain\BusbarModels.cs" />

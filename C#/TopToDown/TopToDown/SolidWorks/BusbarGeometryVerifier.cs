@@ -4,7 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SwFeatureDebug
+using BusbarAutomation.Core.Domain;
+
+using BusbarAutomation.Core.Planning;
+
+namespace BusbarAutomation.Cad.SolidWorks
 {
     internal class GeometryBounds
     {

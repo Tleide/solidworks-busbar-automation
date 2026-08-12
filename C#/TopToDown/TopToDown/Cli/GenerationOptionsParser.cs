@@ -1,7 +1,8 @@
 using System;
 using System.Linq;
+using BusbarAutomation.Application;
 
-namespace SwFeatureDebug
+namespace BusbarAutomation.Cli
 {
     internal static class GenerationOptionsParser
     {

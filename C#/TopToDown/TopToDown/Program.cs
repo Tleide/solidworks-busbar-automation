@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using BusbarAutomation.Application;
-using BusbarAutomation.Cad.SolidWorks;
 using BusbarAutomation.Core.Domain;
 
 namespace BusbarAutomation.Cli

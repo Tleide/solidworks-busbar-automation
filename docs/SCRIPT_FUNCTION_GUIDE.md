@@ -30,7 +30,7 @@
 | `GenerationOptions` | 一次运行的不可共享开关集合，由解析器创建后传给 Runner 和建模器，不再使用全局可变标志。 |
 | `Main(args)` | 解析命令行，创建 `SolidWorksGenerationRunner`，统一捕获未处理异常并返回进程退出码。 |
 
-### `App/GenerationOptionsParser.cs`
+### `Cli/GenerationOptionsParser.cs`
 
 职责：严格解析命令行参数，拒绝未知参数和互斥模式组合。新增命令行参数时改这里，并同步补充单元测试。
 
@@ -336,7 +336,7 @@
 
 | 类/函数 | 作用 |
 | --- | --- |
-| `BusbarPreflightReport` | 保存 `INFO`、`WARNING`、`ERROR` 消息，统计结果并输出 PowerShell 控制台报告。未来 UI 直接消费该对象。 |
+| `BusbarPreflightReport` | 保存 `INFO`、`WARNING`、`ERROR` 消息并提供统计结果；不负责输出。CLI 由 `PreflightConsolePresenter` 展示，未来 UI 可直接消费该对象。 |
 | `ValidateConfiguration(settings)` | 验证规格、ABC/N 电流选型表、单双排枚举和汇流排基础参数。 |
 | `ValidatePlan(plan, settings, phaseNames)` | 验证实际选型、汇流排范围、分支数量、孔位对应关系和双排几何契约。 |
 | `ValidateDoubleClampRoutes(...)` | 验证上下排终点高度、上排 Z 错层和外侧避让路径的首段、斜段、回接关系。 |
@@ -400,16 +400,34 @@
 
 这一层集中处理 SolidWorks API。后续如果换 UG/NXOpen，大部分需要重写的是这一层，而不是 `Domain/Rules/Planning`。
 
-### `SolidWorks/SolidWorksGenerationRunner.cs`
+### `Cli/SolidWorksGenerationRunner.cs`
 
-职责：当前 SolidWorks 后端主流程。
+职责：当前 CLI 组合根。把 Application 规划工作流、SolidWorks CAD 适配器和 Reporting 服务串起来。
 
 | 函数 | 作用 |
 | --- | --- |
 | `SolidWorksGenerationRunner(...)` | 接收本轮 `BusbarSettings` 和 `GenerationOptions`，创建专属零件建模器。 |
-| `Run()` | 校验配置，连接 SW，调用扫描器，建立计划并预检，再分派预览、报表、既有实体校验或完整生成。正常生成不会预先删除旧件。 |
+| `Run()` | 创建规划工作流，连接 SW，调用扫描器，建立计划并预检，再分派预览、报表、既有实体校验或完整生成。正常生成不会预先删除旧件。 |
 | `VerifyExistingGeometry(...)` | 调用只读实体校验器，并在失败时设置非零进程退出码。 |
-| `ExportProductionReport(...)` | 将当前完整计划导出到装配体旁的 `Reports` 目录。 |
+| `ExportProductionReport(...)` | 调用 `ProductionReportService` 将当前完整计划导出到装配体旁的 `Reports` 目录。 |
+
+### `App/BusbarPlanningWorkflow.cs`
+
+职责：不依赖 SolidWorks 的应用层规划流程。
+
+| 函数 | 作用 |
+| --- | --- |
+| `BusbarPlanningWorkflow(...)` | 校验配置并创建本次运行的工程配置快照。 |
+| `Build(...)` | 将扫描点转换为装配快照，生成设计计划和制造计划，并返回结构化预检报告。规划异常也转换为预检错误。 |
+| `CreateFailureReport(...)` | 把连接或扫描阶段异常合并到配置报告中。 |
+
+### `Cli/PreflightConsolePresenter.cs`
+
+职责：将结构化预检结果渲染为控制台文本。它不参与规则判断，也不修改报告。
+
+### `Reporting/ProductionReportService.cs`
+
+职责：根据装配体路径确定 `Reports` 输出目录，再调用 `ProductionReportExporter`。它不调用 SolidWorks API。
 
 ### `SolidWorks/BusbarGeometryVerifier.cs`
 

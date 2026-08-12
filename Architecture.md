@@ -10,13 +10,18 @@ C#/TopToDown
 ├─ TopToDown
 │  ├─ Program.cs
 │  ├─ App
-│  │  └─ GenerationOptionsParser.cs
+│  │  ├─ AssemblySnapshotFactory.cs
+│  │  ├─ BusbarPlanningWorkflow.cs
+│  │  └─ GenerationOptions.cs
+│  ├─ Cli
+│  │  ├─ GenerationOptionsParser.cs
+│  │  ├─ PreflightConsolePresenter.cs
+│  │  └─ SolidWorksGenerationRunner.cs
 │  ├─ Domain
 │  ├─ Rules
 │  ├─ Planning
 │  ├─ Reporting
 │  ├─ SolidWorks
-│  │  ├─ SolidWorksGenerationRunner.cs
 │  │  ├─ SolidWorksSession.cs
 │  │  ├─ AssemblyScanner.cs
 │  │  ├─ BusbarBatchBuilder.cs
@@ -45,15 +50,16 @@ C#/TopToDown
 
 ```text
 Program
-  -> SolidWorksGenerationRunner
-      -> AssemblyReferencePointScanner
-      -> AssemblySnapshotFactory
-      -> BusbarPlanBuilder.BuildDesignPlan -> Rules / Domain
-      -> BusbarManufacturingPlanner.Build
-      -> BusbarPreflightValidator
+  -> Cli.SolidWorksGenerationRunner
+      -> Application.BusbarPlanningWorkflow
+          -> AssemblySnapshotFactory
+          -> BusbarPlanBuilder.BuildDesignPlan -> Rules / Domain
+          -> BusbarManufacturingPlanner.Build
+          -> BusbarPreflightValidator
+      -> SolidWorksSession / AssemblyReferencePointScanner
       -> SolidWorksBusbarPartBuilder
       -> BusbarGeometryVerifier
-      -> ProductionReportExporter
+      -> Reporting.ProductionReportService -> ProductionReportExporter
 ```
 
 `Domain`、`Rules`、`Planning`、`Reporting` 不允许引用 `ModelDoc2`、`Feature`、`Component2` 等 SolidWorks 类型。
@@ -80,6 +86,10 @@ Program
 ## 4. 关键设计决定
 
 - `Program` 不再承载 CAD 方法，只保存默认设置并启动 Runner。
+- `Cli.SolidWorksGenerationRunner` 是当前组合根，负责连接 CLI 选项、Application 规划流程、SolidWorks 适配器和报表服务；它不是 CAD API 实现类。
+- `Application.BusbarPlanningWorkflow` 统一配置快照、设计计划、制造计划和生成前预检，不引用 SolidWorks API。
+- `Cli.PreflightConsolePresenter` 负责预检文本展示；`BusbarPreflightReport` 只保存结构化结果，未来 UI 可直接消费。
+- `Reporting.ProductionReportService` 负责根据装配路径选择报表输出目录；`ProductionReportExporter` 只负责 workbook 内容。
 - `GenerationOptions` 按运行实例传递，不使用全局可变命令行标志。
 - 搭接矩阵未覆盖时失败关闭，不再用中心孔掩盖缺失规则。
 - 孔切除使用唯一方向和材料厚度，不通过多组参数反复试切。

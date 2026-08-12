@@ -80,8 +80,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App\AssemblySnapshotFactory.cs" />
+    <Compile Include="App\BusbarPlanningWorkflow.cs" />
     <Compile Include="App\GenerationOptions.cs" />
     <Compile Include="Cli\GenerationOptionsParser.cs" />
+    <Compile Include="Cli\PreflightConsolePresenter.cs" />
+    <Compile Include="Cli\SolidWorksGenerationRunner.cs" />
     <Compile Include="Domain\BusbarGenerationSettings.cs" />
     <Compile Include="Domain\AssemblySnapshot.cs" />
     <Compile Include="Domain\BusbarOverlapRuleCatalog.cs" />
@@ -108,6 +111,7 @@
     <Compile Include="Planning\CollectorLayoutPlanner.cs" />
     <Compile Include="Planning\ContactTopologyResolver.cs" />
     <Compile Include="Reporting\ProductionReportExporter.cs" />
+    <Compile Include="Reporting\ProductionReportService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Rules\ManualBusbarRuleSet.cs" />
@@ -125,7 +129,6 @@
     <Compile Include="SolidWorks\SheetMetalFeatureBuilder.cs" />
     <Compile Include="SolidWorks\SheetMetalSketchBuilder.cs" />
     <Compile Include="SolidWorks\SolidWorksCom.cs" />
-    <Compile Include="SolidWorks\SolidWorksGenerationRunner.cs" />
     <Compile Include="SolidWorks\SolidWorksSession.cs" />
   </ItemGroup>
   <ItemGroup>

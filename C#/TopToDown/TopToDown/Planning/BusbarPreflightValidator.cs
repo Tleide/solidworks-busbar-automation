@@ -65,31 +65,6 @@ namespace BusbarAutomation.Core.Planning
             Add(PreflightSeverity.Error, scope, message);
         }
 
-        public void PrintToConsole()
-        {
-            Console.WriteLine();
-            Console.WriteLine("===== " + Title + " =====");
-
-            foreach (PreflightMessage message in Messages)
-            {
-                Console.WriteLine(
-                    "[" + message.Severity.ToString().ToUpperInvariant() + "] " +
-                    message.Scope + ": " +
-                    message.Message);
-            }
-
-            Console.WriteLine();
-            Console.WriteLine(
-                "Summary: errors=" + ErrorCount +
-                ", warnings=" + WarningCount +
-                ", info=" + InfoCount + ".");
-            Console.WriteLine(
-                HasErrors
-                    ? "Result: FAILED. " + FailureResultMessage
-                    : WarningCount > 0
-                        ? "Result: PASSED WITH WARNINGS."
-                        : "Result: PASSED.");
-        }
     }
 
     // Validates planning output against independent configuration and geometry contracts.

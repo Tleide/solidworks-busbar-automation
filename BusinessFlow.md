@@ -7,7 +7,7 @@
 ```text
 Program 读取命令行参数
 ↓
-SolidWorksGenerationRunner 进入 SW 生成主线
+Cli.SolidWorksGenerationRunner 进入组合主线
 ↓
 连接 / 激活 SolidWorks 装配体
 ↓
@@ -15,21 +15,7 @@ SolidWorksGenerationRunner 进入 SW 生成主线
 ↓
 提取连接点 FoundPoint，并标准化为 AssemblySnapshot
 ↓
-AssemblySnapshotFactory 识别刀熔、漏保和额定电流
-↓
-ManualPortRuleProvider 创建 ConnectionPort
-↓
-CollectorLayoutPlanner 确定汇流排位置和长度
-↓
-BusbarPlanBuilder 生成 BusbarDesignPlan
-↓
-BusbarRoutePlanner 路径规划
-↓
-BusbarManufacturingPlanner 生成制造计划
-↓
-ContactTopologyResolver 应用端部裕度和厚度过渡策略，并生成钣金草图线
-↓
-BusbarPreflightValidator 生成前预检
+BusbarPlanningWorkflow 统一执行输入标准化、设计/制造规划和生成前预检
 ↓
 SolidWorks 层生成 2D 开放轮廓草图
 ↓
@@ -39,19 +25,20 @@ MountingHoleBuilder 孔切除
 ↓
 暂存插入并执行真实实体校验
 ↓
-校验通过后替换旧组件并导出报表
+校验通过后替换旧组件，并由 Reporting 服务导出报表
 ```
 
 ## 2. 阶段输入输出
 
 | 阶段 | 输入 | 输出 | 当前位置 |
 | --- | --- | --- | --- |
-| 命令行入口 | `args` | `GenerationOptions` | `App/GenerationOptionsParser.cs` |
-| SolidWorks 主线 | 运行开关、默认设置 | 完整生成流程 | `SolidWorks/SolidWorksGenerationRunner.cs` |
+| 命令行入口 | `args` | `GenerationOptions` | `Cli/GenerationOptionsParser.cs` |
+| CLI 组合主线 | 运行开关、默认设置 | 完整生成流程 | `Cli/SolidWorksGenerationRunner.cs` |
 | 装配体读取 | SolidWorks 会话 | `ModelDoc2`、`AssemblyDoc` | `SolidWorks/SolidWorksSession.cs` |
 | 扫描阶段 | 装配体、组件 Transform | `FoundPoint` | `SolidWorks/AssemblyScanner.cs` |
 | 点位提取 | `RefPoint` | 装配体坐标 `Point3` | `AssemblyScanner.TransformPoint` |
 | 输入标准化 | 所有 `FoundPoint`、支持的电流规格 | `AssemblySnapshot` | `App/AssemblySnapshotFactory.cs` |
+| 应用规划工作流 | 扫描点、工程配置 | `BusbarManufacturingPlan` + 预检报告 | `App/BusbarPlanningWorkflow.cs` |
 | 端口生成 | 命名点、手动规则 | `ConnectionPort` | `Rules/ManualPortRuleProvider.cs` |
 | 汇流排布局 | 端口、相序、设置 | `CollectorLayout` | `Planning/CollectorLayoutPlanner.cs` |
 | 连接关系 | 设备端口、汇流排 Tap | `Busbar` | `BusbarPlanBuilder.CreateBusbar` |
@@ -65,6 +52,8 @@ MountingHoleBuilder 孔切除
 | 保存装配 | 零件文档 | `SLDPRT`、装配组件 | `SolidWorks/PartPersistenceService.cs` |
 | 实体校验 | 暂存/既有组件、计划 | 尺寸/孔贯穿/贴合报告 | `SolidWorks/BusbarGeometryVerifier.cs` |
 | 组件替换 | 已通过暂存校验的新组件 | 清理后的装配体 | `SolidWorks/GeneratedComponentManager.cs` |
+| 预检展示 | 结构化预检报告 | 控制台文本 | `Cli/PreflightConsolePresenter.cs` |
+| 报表导出协调 | 制造计划、装配路径 | `Reports/*.xlsx` | `Reporting/ProductionReportService.cs` |
 
 ## 3. Mermaid 流程图
 

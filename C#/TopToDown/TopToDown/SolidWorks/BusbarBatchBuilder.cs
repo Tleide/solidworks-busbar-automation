@@ -4,8 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-using BusbarAutomation.Application;
-
 using BusbarAutomation.Core.Domain;
 
 using BusbarAutomation.Core.Planning;
@@ -14,18 +12,26 @@ namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {
-        private readonly GenerationOptions _options;
+        private readonly bool _replaceExistingBusbar;
+        private readonly string[] _onlyBusbarNames;
         private readonly string[] _phaseNames;
         private readonly string _neutralConductorName;
+        private readonly Action<BusbarPreflightReport> _reportSink;
 
         public SolidWorksBusbarPartBuilder(
-            GenerationOptions options,
+            bool replaceExistingBusbar,
+            string[] onlyBusbarNames,
             string[] phaseNames,
-            string neutralConductorName)
+            string neutralConductorName,
+            Action<BusbarPreflightReport> reportSink)
         {
-            _options = options ?? throw new ArgumentNullException("options");
-            _phaseNames = phaseNames ?? throw new ArgumentNullException("phaseNames");
+            _replaceExistingBusbar = replaceExistingBusbar;
+            _onlyBusbarNames = onlyBusbarNames == null ? null : (string[])onlyBusbarNames.Clone();
+            _phaseNames = phaseNames == null
+                ? throw new ArgumentNullException("phaseNames")
+                : (string[])phaseNames.Clone();
             _neutralConductorName = neutralConductorName ?? throw new ArgumentNullException("neutralConductorName");
+            _reportSink = reportSink ?? throw new ArgumentNullException("reportSink");
         }
 
         private sealed class StagedBusbarPart
@@ -55,14 +61,14 @@ namespace BusbarAutomation.Cad.SolidWorks
 
             selected.AddRange(FindOptionalBusbars(plan, _neutralConductorName, BusbarKind.Branch));
 
-            if (_options.OnlyBusbarNames != null && _options.OnlyBusbarNames.Length > 0)
+            if (_onlyBusbarNames != null && _onlyBusbarNames.Length > 0)
             {
                 selected = selected
-                    .Where(b => _options.OnlyBusbarNames.Any(name => SameText(b.Name, name)))
+                    .Where(b => _onlyBusbarNames.Any(name => SameText(b.Name, name)))
                     .ToList();
 
                 if (selected.Count == 0)
-                    throw new Exception("No planned busbar matches --only=" + string.Join(",", _options.OnlyBusbarNames));
+                    throw new Exception("No planned busbar matches --only=" + string.Join(",", _onlyBusbarNames));
             }
 
             Console.WriteLine();
@@ -146,7 +152,7 @@ namespace BusbarAutomation.Cad.SolidWorks
                         assemblyModel,
                         assembly,
                         staged.Select(item => new KeyValuePair<Busbar, Component2>(item.Busbar, item.Component)));
-                    stagedReport.PrintToConsole();
+                    _reportSink(stagedReport);
                     if (stagedReport.HasErrors)
                         throw new InvalidOperationException("Staged busbar geometry verification failed. Existing busbars were not changed.");
 
@@ -177,12 +183,12 @@ namespace BusbarAutomation.Cad.SolidWorks
                     throw;
                 }
 
-                if (_options.ReplaceExistingBusbar)
+                if (_replaceExistingBusbar)
                 {
                     HashSet<string> stagedNames = new HashSet<string>(
                         staged.Select(item => item.Component.Name2),
                         StringComparer.OrdinalIgnoreCase);
-                    HashSet<string> replacementNames = _options.OnlyBusbarNames == null
+                    HashSet<string> replacementNames = _onlyBusbarNames == null
                         ? null
                         : new HashSet<string>(staged.Select(item => item.Busbar.Name), StringComparer.OrdinalIgnoreCase);
                     GeneratedComponentManager.DeleteExistingBusbars(

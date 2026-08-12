@@ -1,17 +1,14 @@
 using SolidWorks.Interop.sldworks;
 using System;
 using System.Collections.Generic;
-using System.IO;
 
 using BusbarAutomation.Application;
-
+using BusbarAutomation.Cad.SolidWorks;
 using BusbarAutomation.Core.Domain;
-
 using BusbarAutomation.Core.Planning;
-
 using BusbarAutomation.Reporting;
 
-namespace BusbarAutomation.Cad.SolidWorks
+namespace BusbarAutomation.Cli
 {
     internal sealed class SolidWorksGenerationRunner
     {
@@ -26,22 +23,23 @@ namespace BusbarAutomation.Cad.SolidWorks
         {
             _settings = settings ?? throw new ArgumentNullException("settings");
             _options = options ?? throw new ArgumentNullException("options");
-            _partBuilder = new SolidWorksBusbarPartBuilder(options, PhaseNames, NeutralConductorName);
+            _partBuilder = new SolidWorksBusbarPartBuilder(
+                options.ReplaceExistingBusbar,
+                options.OnlyBusbarNames,
+                PhaseNames,
+                NeutralConductorName,
+                PreflightConsolePresenter.Print);
         }
 
         public void Run()
         {
-            BusbarPreflightReport configurationReport = BusbarPreflightValidator.ValidateConfiguration(_settings);
-            if (configurationReport.HasErrors)
+            BusbarPlanningWorkflow planningWorkflow = new BusbarPlanningWorkflow(_settings, PhaseNames);
+            if (!planningWorkflow.CanBuild)
             {
-                configurationReport.PrintToConsole();
+                PreflightConsolePresenter.Print(planningWorkflow.ConfigurationReport);
                 StopAfterPreflightFailure();
                 return;
             }
-
-            EngineeringConfigurationSnapshot configuration =
-                EngineeringConfigurationSnapshot.FromSettings(_settings);
-            BusbarSettings planningSettings = configuration.ToPlanningSettings();
 
             SldWorks swApp;
             ModelDoc2 model;
@@ -54,53 +52,37 @@ namespace BusbarAutomation.Cad.SolidWorks
             }
             catch (Exception exception)
             {
-                configurationReport.Messages.AddRange(BusbarPreflightValidator.CreatePlanningFailure(exception).Messages);
-                configurationReport.PrintToConsole();
+                PreflightConsolePresenter.Print(planningWorkflow.CreateFailureReport(exception));
                 StopAfterPreflightFailure();
                 return;
             }
 
-            List<FoundPoint> scannedPoints = new AssemblyReferencePointScanner(_options.VerboseFeatureScan)
-                .Scan(swApp, model, assembly);
-            BusbarManufacturingPlan plan;
+            List<FoundPoint> scannedPoints;
             try
             {
-                AssemblySnapshot assemblySnapshot = AssemblySnapshotFactory.FromFoundPoints(
-                    scannedPoints,
-                    PhaseNames,
-                    configuration.GetSupportedRatedCurrents(),
-                    model.GetPathName());
-                BusbarDesignPlan design = BusbarPlanBuilder.BuildDesignPlan(
-                    assemblySnapshot,
-                    PhaseNames,
-                    configuration);
-                plan = BusbarManufacturingPlanner.Build(design, configuration);
+                scannedPoints = new AssemblyReferencePointScanner(_options.VerboseFeatureScan)
+                    .Scan(swApp, model, assembly);
             }
             catch (Exception exception)
             {
-                configurationReport.Messages.AddRange(BusbarPreflightValidator.CreatePlanningFailure(exception).Messages);
-                configurationReport.PrintToConsole();
+                PreflightConsolePresenter.Print(planningWorkflow.CreateFailureReport(exception));
                 StopAfterPreflightFailure();
                 return;
             }
 
-            BusbarPreflightReport planReport = BusbarPreflightValidator.ValidatePlan(
-                plan,
-                planningSettings,
-                PhaseNames,
-                configuration.OverlapRules);
-            planReport.Messages.InsertRange(0, configurationReport.Messages);
-            planReport.PrintToConsole();
+            BusbarPlanningResult planningResult = planningWorkflow.Build(scannedPoints, model.GetPathName());
+            PreflightConsolePresenter.Print(planningResult.Report);
+            BusbarManufacturingPlan plan = planningResult.Plan;
 
             if (_options.ExportReportOnly)
             {
-                if (planReport.HasErrors)
+                if (planningResult.Report.HasErrors || plan == null)
                 {
                     StopAfterPreflightFailure();
                     return;
                 }
 
-                ExportProductionReport(model, plan);
+                ExportProductionReport(plan, model.GetPathName());
                 Console.WriteLine("Production-report-only mode complete. The assembly was not modified.");
                 return;
             }
@@ -111,7 +93,7 @@ namespace BusbarAutomation.Cad.SolidWorks
                 return;
             }
 
-            if (planReport.HasErrors)
+            if (planningResult.Report.HasErrors || plan == null)
             {
                 StopAfterPreflightFailure();
                 return;
@@ -150,7 +132,7 @@ namespace BusbarAutomation.Cad.SolidWorks
 
             if (geometryPassed && _options.ReplaceExistingBusbar &&
                 (_options.OnlyBusbarNames == null || _options.OnlyBusbarNames.Length == 0))
-                ExportProductionReport(model, plan);
+                ExportProductionReport(plan, model.GetPathName());
             else if (geometryPassed && _options.OnlyBusbarNames != null)
                 Console.WriteLine("Production report was skipped because --only generated only part of the complete plan.");
             else if (geometryPassed && !_options.ReplaceExistingBusbar)
@@ -192,7 +174,7 @@ namespace BusbarAutomation.Cad.SolidWorks
                 assembly,
                 expected,
                 completePlan);
-            geometryReport.PrintToConsole();
+            PreflightConsolePresenter.Print(geometryReport);
 
             if (geometryReport.HasErrors)
             {
@@ -205,14 +187,9 @@ namespace BusbarAutomation.Cad.SolidWorks
             return true;
         }
 
-        private static string ExportProductionReport(ModelDoc2 assemblyModel, BusbarManufacturingPlan plan)
+        private static string ExportProductionReport(BusbarManufacturingPlan plan, string assemblyPath)
         {
-            string assemblyPath = assemblyModel == null ? null : assemblyModel.GetPathName();
-            string rootFolder = string.IsNullOrWhiteSpace(assemblyPath)
-                ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.DesktopDirectory)
-                : Path.GetDirectoryName(assemblyPath);
-            string outputFolder = Path.Combine(rootFolder, "Reports");
-            string reportPath = ProductionReportExporter.Export(plan, outputFolder);
+            string reportPath = ProductionReportService.ExportForAssembly(plan, assemblyPath);
 
             Console.WriteLine("Production report exported: " + reportPath);
             return reportPath;

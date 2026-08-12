@@ -11,7 +11,7 @@ namespace BusbarAutomation.Core.Planning
     internal static class BusbarPlanBuilder
     {
         private const string NeutralConductorName = "N";
-        public static BusbarPlan BuildPlan(
+        public static BusbarDesignPlan BuildDesignPlan(
             AssemblySnapshot assembly,
             string[] phaseNames,
             EngineeringConfigurationSnapshot configuration)
@@ -30,7 +30,6 @@ namespace BusbarAutomation.Core.Planning
             ManualPortRuleProvider portRules = new ManualPortRuleProvider(rules);
             CollectorLayoutPlanner collectorPlanner = new CollectorLayoutPlanner(rules, settings);
             BusbarRoutePlanner routePlanner = new BusbarRoutePlanner(settings);
-            ContactTopologyResolver topology = new ContactTopologyResolver();
             BusbarOverlapHolePlanner overlapHolePlanner =
                 new BusbarOverlapHolePlanner(configuration.OverlapRules);
 
@@ -40,7 +39,7 @@ namespace BusbarAutomation.Core.Planning
             if (loubaos.Count == 0)
                 throw new Exception("No loubao components were found for planning.");
 
-            BusbarPlan plan = new BusbarPlan
+            BusbarDesignPlan plan = new BusbarDesignPlan
             {
                 Rules = rules,
                 FuseComponentName = fuseComponent,
@@ -94,9 +93,7 @@ namespace BusbarAutomation.Core.Planning
                     fuseOut,
                     mainTap,
                     rules,
-                    settings,
                     routePlanner,
-                    topology,
                     BranchLegRole.Single);
                 ApplyCollectorOverlapHoleRules(mainFeed, mainTap, collector, settings.CollectorProfile, overlapHolePlanner, true);
                 plan.Busbars.Add(mainFeed);
@@ -108,7 +105,6 @@ namespace BusbarAutomation.Core.Planning
                         portRules,
                         collectorPlanner,
                         routePlanner,
-                        topology,
                         overlapHolePlanner,
                         rules,
                         settings,
@@ -126,8 +122,6 @@ namespace BusbarAutomation.Core.Planning
                     phase,
                     collector,
                     rules,
-                    settings,
-                    topology,
                     settings.CollectorProfile,
                     rules.MainFeedCollectorFace));
             }
@@ -140,25 +134,21 @@ namespace BusbarAutomation.Core.Planning
                 portRules,
                 collectorPlanner,
                 routePlanner,
-                topology,
                 overlapHolePlanner,
                 rules,
                 settings);
-
-            FastenerPlanBuilder.BuildCollectorJoints(plan, settings);
 
             return plan;
         }
 
         private static void AddNeutralCollectorAndBranches(
-            BusbarPlan plan,
+            BusbarDesignPlan plan,
             AssemblySnapshot assembly,
             List<LoubaoGroup> loubaos,
             int neutralPhaseIndex,
             ManualPortRuleProvider portRules,
             CollectorLayoutPlanner collectorPlanner,
             BusbarRoutePlanner routePlanner,
-            ContactTopologyResolver topology,
             BusbarOverlapHolePlanner overlapHolePlanner,
             ManualBusbarRuleSet rules,
             BusbarSettings settings)
@@ -190,7 +180,6 @@ namespace BusbarAutomation.Core.Planning
                     portRules,
                     collectorPlanner,
                     routePlanner,
-                    topology,
                     overlapHolePlanner,
                     rules,
                     settings,
@@ -208,8 +197,6 @@ namespace BusbarAutomation.Core.Planning
                 NeutralConductorName,
                 neutralCollector,
                 rules,
-                settings,
-                topology,
                 settings.NeutralCollectorProfile,
                 rules.BranchCollectorFace));
         }
@@ -255,8 +242,6 @@ namespace BusbarAutomation.Core.Planning
             string phase,
             CollectorLayout collector,
             ManualBusbarRuleSet rules,
-            BusbarSettings settings,
-            ContactTopologyResolver topology,
             BusbarProfile profile,
             ContactFace collectorFace)
         {
@@ -285,8 +270,7 @@ namespace BusbarAutomation.Core.Planning
                 {
                     AxisOrder = rules.RouteAxisOrder,
                     TransitionPolicy = rules.TransitionPolicy
-                },
-                SheetMetal = SheetMetalOptions.FromRules(rules, settings, BusbarKind.Collector)
+                }
             };
 
             busbar.LogicalCenterline = new List<Point3>
@@ -294,7 +278,6 @@ namespace BusbarAutomation.Core.Planning
                 start.HoleCenter,
                 end.HoleCenter
             };
-            busbar.SheetMetalSketchLine = topology.CreateSheetMetalSketchLine(busbar);
             busbar.MountingPorts = collector.TapPorts
                 .Where(p => p.HoleDiameterMm > 0.0)
                 .Select(CloneConnectionPort)
@@ -341,11 +324,10 @@ namespace BusbarAutomation.Core.Planning
         }
 
         private static void AddPlannedBranchBusbars(
-            BusbarPlan plan,
+            BusbarDesignPlan plan,
             ManualPortRuleProvider portRules,
             CollectorLayoutPlanner collectorPlanner,
             BusbarRoutePlanner routePlanner,
-            ContactTopologyResolver topology,
             BusbarOverlapHolePlanner overlapHolePlanner,
             ManualBusbarRuleSet rules,
             BusbarSettings settings,
@@ -376,9 +358,7 @@ namespace BusbarAutomation.Core.Planning
                     devicePort,
                     tap,
                     rules,
-                    settings,
                     routePlanner,
-                    topology,
                     BranchLegRole.Single);
                 ApplyCollectorOverlapHoleRules(branch, tap, collector, collectorProfile, overlapHolePlanner, true);
                 plan.Busbars.Add(branch);
@@ -407,9 +387,7 @@ namespace BusbarAutomation.Core.Planning
                 devicePort,
                 lowerRouteEnd,
                 rules,
-                settings,
                 routePlanner,
-                topology,
                 BranchLegRole.Lower,
                 BranchRouteMode.Standard,
                 ThicknessTransitionPolicy.None);
@@ -445,9 +423,7 @@ namespace BusbarAutomation.Core.Planning
                 upperStart,
                 upperRouteEnd,
                 rules,
-                settings,
                 routePlanner,
-                topology,
                 BranchLegRole.Upper,
                 BranchRouteMode.DoubleClampOuterAvoidance);
             ApplyCollectorOverlapHoleRules(upperBranch, upperTap, collector, collectorProfile, overlapHolePlanner, false);
@@ -529,9 +505,7 @@ namespace BusbarAutomation.Core.Planning
             ConnectionPort start,
             ConnectionPort end,
             ManualBusbarRuleSet rules,
-            BusbarSettings settings,
             BusbarRoutePlanner routePlanner,
-            ContactTopologyResolver topology,
             BranchLegRole branchLegRole,
             BranchRouteMode branchRouteMode = BranchRouteMode.Standard,
             ThicknessTransitionPolicy? transitionPolicy = null)
@@ -549,12 +523,10 @@ namespace BusbarAutomation.Core.Planning
                     AxisOrder = rules.RouteAxisOrder,
                     TransitionPolicy = transitionPolicy ?? rules.TransitionPolicy,
                     BranchRouteMode = branchRouteMode
-                },
-                SheetMetal = SheetMetalOptions.FromRules(rules, settings, kind)
+                }
             };
 
             busbar.LogicalCenterline = routePlanner.CreateRoute(kind, profile, start, end, busbar.Routing);
-            busbar.SheetMetalSketchLine = topology.CreateSheetMetalSketchLine(busbar);
             AddMountingPortIfNeeded(busbar, start);
             AddMountingPortIfNeeded(busbar, end);
             return busbar;

@@ -98,6 +98,8 @@
     <Compile Include="Domain\SheetMetalBaseFlangeExtent.cs" />
     <Compile Include="Domain\SheetMetalOpenProfilePlane.cs" />
     <Compile Include="Planning\BusbarPlanBuilder.cs" />
+    <Compile Include="Planning\BusbarPlans.cs" />
+    <Compile Include="Planning\BusbarManufacturingPlanner.cs" />
     <Compile Include="Planning\BusbarDirectionResolver.cs" />
     <Compile Include="Planning\BusbarOverlapHolePlanner.cs" />
     <Compile Include="Planning\BusbarPreflightValidator.cs" />

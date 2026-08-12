@@ -62,7 +62,7 @@ namespace BusbarAutomation.Cad.SolidWorks
 
             List<FoundPoint> scannedPoints = new AssemblyReferencePointScanner(_options.VerboseFeatureScan)
                 .Scan(swApp, model, assembly);
-            BusbarPlan plan;
+            BusbarManufacturingPlan plan;
             try
             {
                 AssemblySnapshot assemblySnapshot = AssemblySnapshotFactory.FromFoundPoints(
@@ -70,7 +70,11 @@ namespace BusbarAutomation.Cad.SolidWorks
                     PhaseNames,
                     configuration.GetSupportedRatedCurrents(),
                     model.GetPathName());
-                plan = BusbarPlanBuilder.BuildPlan(assemblySnapshot, PhaseNames, configuration);
+                BusbarDesignPlan design = BusbarPlanBuilder.BuildDesignPlan(
+                    assemblySnapshot,
+                    PhaseNames,
+                    configuration);
+                plan = BusbarManufacturingPlanner.Build(design, configuration);
             }
             catch (Exception exception)
             {
@@ -178,7 +182,7 @@ namespace BusbarAutomation.Cad.SolidWorks
         private bool VerifyExistingGeometry(
             ModelDoc2 model,
             AssemblyDoc assembly,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             List<Busbar> expectedBusbars = null)
         {
             List<Busbar> expected = expectedBusbars ?? _partBuilder.SelectBusbarsForSheetMetalBatch(plan);
@@ -201,7 +205,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             return true;
         }
 
-        private static string ExportProductionReport(ModelDoc2 assemblyModel, BusbarPlan plan)
+        private static string ExportProductionReport(ModelDoc2 assemblyModel, BusbarManufacturingPlan plan)
         {
             string assemblyPath = assemblyModel == null ? null : assemblyModel.GetPathName();
             string rootFolder = string.IsNullOrWhiteSpace(assemblyPath)

@@ -35,7 +35,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             public Component2 Component;
         }
 
-        public List<Busbar> SelectBusbarsForSheetMetalBatch(BusbarPlan plan)
+        public List<Busbar> SelectBusbarsForSheetMetalBatch(BusbarManufacturingPlan plan)
         {
             if (plan == null)
                 throw new Exception("Busbar batch plan is null.");
@@ -74,7 +74,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             return selected;
         }
 
-        private Busbar FindRequiredBusbar(BusbarPlan plan, string phase, BusbarKind kind)
+        private Busbar FindRequiredBusbar(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
         {
             string phasePrefix = "Busbar_" + phase + "_";
 
@@ -89,7 +89,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             return busbar;
         }
 
-        private List<Busbar> FindBusbars(BusbarPlan plan, string phase, BusbarKind kind)
+        private List<Busbar> FindBusbars(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
         {
             string phasePrefix = "Busbar_" + phase + "_";
 
@@ -104,7 +104,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             return busbars;
         }
 
-        private List<Busbar> FindOptionalBusbars(BusbarPlan plan, string phase, BusbarKind kind)
+        private List<Busbar> FindOptionalBusbars(BusbarManufacturingPlan plan, string phase, BusbarKind kind)
         {
             string phasePrefix = "Busbar_" + phase + "_";
 

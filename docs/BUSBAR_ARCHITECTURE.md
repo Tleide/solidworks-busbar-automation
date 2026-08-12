@@ -13,7 +13,7 @@
 
 ### 1.1 钣金规则快照
 
-`BusbarSettings` 是生成前的输入配置。`BusbarPlanBuilder` 在建立 `BusbarPlan` 时，将折弯半径、K 因子、宽度生成侧和加厚方向解析并固化到每根 `Busbar.SheetMetal`。此后 SolidWorks 建模层和生产报表都只读取该快照，不能再回读全局 `Settings` 中的钣金参数。
+`BusbarSettings` 是生成前的输入配置。`BusbarPlanBuilder` 先建立 `BusbarDesignPlan`；`BusbarManufacturingPlanner` 再将折弯半径、K 因子、宽度生成侧和加厚方向固化到每根 `Busbar.SheetMetal`，并生成钣金草图线。此后 SolidWorks 建模层和生产报表都只读取 `BusbarManufacturingPlan`，不能再回读全局 `Settings` 中的钣金参数。
 
 这保证同一轮生成中实体、预检和报表使用同一份 R/K/宽度方向数据；后续 UI 修改参数时，应先重新建立计划，再执行生成或导出报表。
 
@@ -84,7 +84,8 @@ DirToUse = 1
 | `ConnectionPort` | 可连接铜排的工程端口，包含孔中心、贴合面、引出方向、裕度、孔径。 |
 | `CollectorLayout` | 某相汇流排的中心位置、方向、长度和 Tap 端口。 |
 | `Busbar` | 一根待生成铜排，包含端口、规格、逻辑中心线、钣金草图线和孔位。 |
-| `BusbarPlan` | 当前装配体的完整铜排规划结果。 |
+| `BusbarDesignPlan` | 当前装配体的设备选型、汇流排布局、逻辑路径和搭接孔结果。 |
+| `BusbarManufacturingPlan` | 在设计计划基础上补齐钣金参数、钣金草图线和螺栓选型的制造输入。 |
 
 ## 6. N 相规则
 
@@ -163,11 +164,11 @@ ABC 双排中的 `_Upper` 是 Z-方向外侧排。它在已错层的起点上采
 - 把螺栓规格、两孔/四孔规则和搭接孔规则联动，形成可配置标准表。
 - 汇流排间距从固定值升级为基于螺栓长度和电气间隙的计算。
 - 汇流排位置从固定偏移升级为布局优化函数。
-- 保持 `BusbarPlan` 与 SolidWorks API 解耦；只有第二个 CAD 后端真实接入时，再提取两个后端共同需要的最小生成契约。
+- 保持 `BusbarManufacturingPlan` 与 SolidWorks API 解耦；只有第二个 CAD 后端真实接入时，再提取两个后端共同需要的最小生成契约。
 
 ## 10. 生成前预检
 
-`Planning/BusbarPreflightValidator.cs` 是生成前的独立校验层。它消费已经生成的 `BusbarPlan`，检查规划输出是否满足配置和几何契约；不会再次调用 `BusbarRoutePlanner` 生成第二套路径，也不会调用 SolidWorks 建模 API。
+`Planning/BusbarPreflightValidator.cs` 是生成前的独立校验层。它消费已经生成的 `BusbarManufacturingPlan`，检查设计与制造输出是否满足配置和几何契约；不会再次调用 `BusbarRoutePlanner` 生成第二套路径，也不会调用 SolidWorks 建模 API。
 
 可在 PowerShell 中执行：
 
@@ -175,7 +176,7 @@ ABC 双排中的 `_Upper` 是 Z-方向外侧排。它在已错层的起点上采
 TopToDown.exe --validate
 ```
 
-该模式会连接当前 SolidWorks 装配、扫描参考点、生成 `BusbarPlan` 并输出分级报告，但不会删除已有 `Busbar_*` 组件、不会创建零件、不会保存或修改装配。报告包含 `INFO`、`WARNING`、`ERROR` 和汇总结果。没有激活装配、参考点缺失或额定电流无法解析时，也会以 `ERROR` 形式输出。
+该模式会连接当前 SolidWorks 装配、扫描参考点、依次生成设计计划和制造计划并输出分级报告，但不会删除已有 `Busbar_*` 组件、不会创建零件、不会保存或修改装配。报告包含 `INFO`、`WARNING`、`ERROR` 和汇总结果。没有激活装配、参考点缺失或额定电流无法解析时，也会以 `ERROR` 形式输出。
 
 正常生成同样会先执行预检，只有没有 `ERROR` 才会进入钣金建模。未批准的搭接宽度组合属于阻断错误；例如 `20mm` 分支排不会得到中心孔兜底。旧铜排不会在预检后立即删除，而是在新零件全部生成、暂存插入并通过实体校验后才删除。
 
@@ -197,7 +198,7 @@ TopToDown.exe --validate
 TopToDown.exe --verify-geometry
 ```
 
-该命令先按当前参考点重建期望的 `BusbarPlan`，再把计划与已经存在的实体逐项比对。没有铜排时，它会逐根报告缺失组件；不会自动生成。正常生成流程会先校验本轮暂存组件，确认通过后替换旧件，再对最终装配执行同一校验器。
+该命令先按当前参考点重建期望的 `BusbarManufacturingPlan`，再把计划与已经存在的实体逐项比对。没有铜排时，它会逐根报告缺失组件；不会自动生成。正常生成流程会先校验本轮暂存组件，确认通过后替换旧件，再对最终装配执行同一校验器。
 
 当前实体校验内容：
 
@@ -236,7 +237,7 @@ TopToDown.exe --verify-geometry
 
 ## 13. 生产清单与加工清单
 
-`Reporting/ProductionReportExporter.cs` 以 `BusbarPlan` 为唯一数据源导出 Excel 工作簿，不调用 SolidWorks 建模 API。它包含七个工作表：
+`Reporting/ProductionReportExporter.cs` 以 `BusbarManufacturingPlan` 为唯一数据源导出 Excel 工作簿，不调用 SolidWorks 建模 API。它包含七个工作表：
 
 - `说明`：报表生成口径、铜排/孔/折弯/螺栓总量。
 - `漏保选型`：每台漏保的额定电流、ABC/N 分支铜排规格与单/双排拓扑。

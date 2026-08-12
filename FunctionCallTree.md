@@ -15,13 +15,16 @@ Program.Main(args)
    │  ├─ ReadReferencePointTemplates(...)
    │  ├─ ScanComponentReferencePoints(...)
    │  └─ AddFoundPoints(...) / TransformPoint(...)
-   ├─ BusbarPlanBuilder.BuildPlanFromScannedAssembly(...)
-   │  ├─ 识别刀熔与漏保额定电流
+   ├─ AssemblySnapshotFactory.FromFoundPoints(...)
+   │  └─ 识别刀熔、漏保、额定电流和命名端口
+   ├─ BusbarPlanBuilder.BuildDesignPlan(...)
    │  ├─ ManualPortRuleProvider 创建端口
    │  ├─ CollectorLayoutPlanner 计算汇流排位置与长度
    │  ├─ BusbarRoutePlanner 生成路径
+   │  └─ BusbarOverlapHolePlanner 展开搭接孔
+   ├─ BusbarManufacturingPlanner.Build(...)
    │  ├─ ContactTopologyResolver 生成钣金草图线
-   │  ├─ BusbarOverlapHolePlanner 展开搭接孔
+   │  ├─ 建立每根铜排的钣金参数快照
    │  └─ FastenerPlanBuilder 生成螺栓计划
    ├─ BusbarPreflightValidator.ValidatePlan(...)
    ├─ [--validate] 输出预检后结束
@@ -53,7 +56,9 @@ Program.Main(args)
 | `Parse` | `App/GenerationOptionsParser.cs` | 解析参数并拒绝未知参数、冲突模式和无效组合。 |
 | `Run` | `SolidWorks/SolidWorksGenerationRunner.cs` | 当前 SolidWorks 后端的唯一流程协调入口。 |
 | `Scan` | `SolidWorks/AssemblyScanner.cs` | 读取命名参考点并转换为装配体坐标。 |
-| `BuildPlanFromScannedAssembly` | `Planning/BusbarPlanBuilder.cs` | 从参考点与配置建立完整 `BusbarPlan`。 |
+| `FromFoundPoints` | `App/AssemblySnapshotFactory.cs` | 将 SolidWorks 扫描结果标准化为设备、额定电流和命名端口。 |
+| `BuildDesignPlan` | `Planning/BusbarPlanBuilder.cs` | 从标准化装配输入建立布局、逻辑路径和搭接孔。 |
+| `Build` | `Planning/BusbarManufacturingPlanner.cs` | 补齐钣金草图线、钣金参数和螺栓选型。 |
 | `ValidatePlan` | `Planning/BusbarPreflightValidator.cs` | 在 CAD 建模前检查规划契约。 |
 | `CreateBusbarSheetMetalParts` | `SolidWorks/BusbarBatchBuilder.cs` | 分阶段生成、暂存验证和替换组件。 |
 | `CreateBusbarMountingHole` | `SolidWorks/MountingHoleBuilder.cs` | 在计算出的实体表面创建定向厚度切除。 |

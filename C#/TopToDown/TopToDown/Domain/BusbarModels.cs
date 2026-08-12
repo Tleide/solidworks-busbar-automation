@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using BusbarAutomation.Core.Rules;
 
 namespace BusbarAutomation.Core.Domain
 {
@@ -11,28 +10,6 @@ namespace BusbarAutomation.Core.Domain
         public BusbarWidthMode WidthMode;
         public SheetMetalWidthSide WidthSide;
         public bool ThickenDirection;
-
-        // This is the per-busbar manufacturing snapshot consumed by both CAD and reporting.
-        public static SheetMetalOptions FromRules(
-            ManualBusbarRuleSet rules,
-            BusbarSettings settings,
-            BusbarKind kind)
-        {
-            if (rules == null)
-                throw new ArgumentNullException("rules");
-
-            if (settings == null)
-                throw new ArgumentNullException("settings");
-
-            return new SheetMetalOptions
-            {
-                BendRadiusMm = rules.BendRadiusMm,
-                KFactor = rules.KFactor,
-                WidthMode = rules.WidthMode,
-                WidthSide = settings.GetSheetMetalWidthSide(kind),
-                ThickenDirection = settings.SheetMetalThickenDirection
-            };
-        }
     }
 
     internal class BusbarRoutingOptions
@@ -97,13 +74,4 @@ namespace BusbarAutomation.Core.Domain
         public List<ConnectionPort> TapPorts = new List<ConnectionPort>();
     }
 
-    internal class BusbarPlan
-    {
-        public ManualBusbarRuleSet Rules;
-        public string FuseComponentName;
-        public List<LoubaoGroup> Loubaos = new List<LoubaoGroup>();
-        public List<CollectorLayout> Collectors = new List<CollectorLayout>();
-        public List<Busbar> Busbars = new List<Busbar>();
-        public List<FastenerJointPlan> FastenerJoints = new List<FastenerJointPlan>();
-    }
 }

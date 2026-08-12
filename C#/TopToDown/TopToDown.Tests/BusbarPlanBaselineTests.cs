@@ -28,7 +28,8 @@ namespace BusbarAutomation.Tests
                 PhaseNames,
                 configuration.GetSupportedRatedCurrents(),
                 "RepresentativeAssembly");
-            BusbarPlan plan = BusbarPlanBuilder.BuildPlan(assembly, PhaseNames, configuration);
+            BusbarDesignPlan design = BusbarPlanBuilder.BuildDesignPlan(assembly, PhaseNames, configuration);
+            BusbarManufacturingPlan plan = BusbarManufacturingPlanner.Build(design, configuration);
 
             Assert.AreEqual(28, plan.Busbars.Count, "The representative 630A + 400A + 400A plan must contain 28 busbars.");
             Assert.AreEqual(4, plan.Collectors.Count, "The representative plan must contain A, B, C and N collectors.");

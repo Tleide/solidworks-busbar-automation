@@ -88,13 +88,13 @@
 | 类/函数 | 作用 |
 | --- | --- |
 | `SheetMetalOptions` | 单根铜排的钣金制造快照：折弯半径、K 因子、宽度模式、宽度生成侧和加厚方向。 |
-| `SheetMetalOptions.FromRules(rules, settings, kind)` | 在建立计划时，从已解析规则和项目配置生成快照；SolidWorks 与报表后续共同使用此对象。 |
 | `BusbarRoutingOptions` | 路径规则选项：轴顺序、厚度过渡策略和分支排路径模式。 |
 | `ConnectionPort` | 可连接铜排的工程端口，包含孔中心、贴合面、引出方向、端部裕度、孔径。 |
 | `ConnectionPort.ToString()` | 调试日志用，输出端口详细信息。 |
 | `Busbar` | 一根铜排，包括起终端口、规格、分支腿角色、逻辑中心线、钣金草图线、打孔端口。 |
 | `CollectorLayout` | 某相汇流排的位置、长度、Tap 端口集合。 |
-| `BusbarPlan` | 当前装配体完整铜排规划结果。 |
+| `BusbarDesignPlan` | 设备选型、汇流排布局、逻辑路径和搭接孔结果。 |
+| `BusbarManufacturingPlan` | 钣金参数、钣金草图线和螺栓选型均已补齐的制造结果。 |
 
 ### `Domain/BusbarHoleModels.cs`
 
@@ -231,7 +231,7 @@
 
 ### `Planning/BusbarPlanBuilder.cs`
 
-职责：业务规划总入口，从扫描点生成完整 `BusbarPlan`。
+职责：从标准化的 `AssemblySnapshot` 生成 `BusbarDesignPlan`，不生成钣金草图线和螺栓选型。
 
 最适合修改的场景：
 
@@ -241,7 +241,7 @@
 
 | 函数 | 作用 |
 | --- | --- |
-| `BuildPlanFromScannedAssembly(...)` | 主入口：创建规则、识别设备、为 ABC/N 生成铜排计划。 |
+| `BuildDesignPlan(...)` | 主入口：读取标准化设备输入和配置快照，为 ABC/N 生成布局、逻辑路径和搭接孔。 |
 | `AddNeutralCollectorAndBranches(...)` | 处理 N 相汇流排和 N 分支排。 |
 | `CreateNeutralLoubaoInputs(...)` | 收集每个漏保的 `N_IN`，并检查是否部分缺失。 |
 | `CreateCollectorBusbar(...)` | 根据 `CollectorLayout` 创建一根汇流排对象。 |
@@ -253,15 +253,21 @@
 | `ApplyCollectorOverlapHoleRules(...)` | 在生成中心 Tap 后，根据搭接孔矩阵把中心点展开成实际单孔/双孔孔位，并同步写入连接铜排和汇流排。 |
 | `ReplaceBusbarMountingPort(...)` | 将连接铜排上的中心 Tap 孔替换为搭接规则计算出的实际孔位。 |
 | `ReplaceCollectorTapPort(...)` | 将汇流排布局中的中心 Tap 替换为搭接规则计算出的实际孔位，供汇流排本体打孔。 |
-| `CreateBusbar(...)` | 创建转接排或分支排，生成逻辑路径、草图线和打孔端口。 |
+| `CreateBusbar(...)` | 创建转接排或分支排，生成逻辑路径和打孔端口。 |
 | `AddMountingPortIfNeeded(...)` | 如果端口孔径有效，就加入铜排打孔列表。 |
 | `CloneConnectionPort(...)` | 克隆端口，避免后续修改原始端口影响打孔数据。 |
-| `FindFuseComponent(...)` | 以“完整 A/B/C_OUT + 命中刀熔名称关键词且不命中漏保关键词”为契约；匹配不到或匹配多个都会报错，不按扫描顺序猜测。 |
-| `FindLoubaoGroups(...)` | 从扫描点里识别漏保组件并按 X 排序。 |
-| `ParseRatedCurrentA(...)` | 从漏保组件名称中严格匹配已配置的额定电流标记；无法唯一匹配时直接报错。 |
-| `ResolvePhaseBranchRule(...)` | 根据额定电流取得分支排规格和默认单双排规则。 |
-| `FindRequiredPoint(...)` | 查找必需参考点，缺失时报错。 |
-| `ScoreNameHint(...)` | 根据组件名关键词给刀熔/漏保识别打分。 |
+| `CreateLoubaoGroups(...)` | 根据标准化漏保输入和额定电流规则创建 ABC/N 规格与单双排结果。 |
+| `ResolveBranchRule(...)` | 根据额定电流取得分支排规格和默认单双排规则。 |
+
+### `Planning/BusbarPlans.cs` 与 `BusbarManufacturingPlanner.cs`
+
+职责：明确设计结果和制造结果的边界。制造规划器是 `SheetMetalOptions`、`SheetMetalSketchLine` 和紧固件选型的唯一生成步骤。
+
+| 类/函数 | 作用 |
+| --- | --- |
+| `BusbarDesignPlan` | 保存设备选型、汇流排布局、铜排逻辑路径和搭接孔。 |
+| `BusbarManufacturingPlan` | 包装设计计划，并保存制造阶段生成的紧固件连接计划。 |
+| `BusbarManufacturingPlanner.Build(...)` | 为每根铜排建立钣金参数快照、生成钣金草图线，再调用 `FastenerPlanBuilder`。 |
 
 ### `Planning/CollectorLayoutPlanner.cs`
 
@@ -326,7 +332,7 @@
 
 ### `Planning/BusbarPreflightValidator.cs`
 
-职责：在进入 SolidWorks 建模前，验证配置和已经生成的 `BusbarPlan` 是否满足独立的工程契约。它只读取规划结果，不创建零件、不删除装配组件，也不重新调用路径规划器。
+职责：在进入 SolidWorks 建模前，验证配置和已经生成的 `BusbarManufacturingPlan` 是否满足独立的工程契约。它只读取规划结果，不创建零件、不删除装配组件，也不重新调用路径规划器。
 
 | 类/函数 | 作用 |
 | --- | --- |
@@ -349,7 +355,7 @@
 
 ### `Reporting/ProductionReportExporter.cs`
 
-职责：把完整的 `BusbarPlan` 转换成生产和加工所需的 Excel 报表，不依赖 SolidWorks 实体。它生成漏保选型、铜排汇总、逐根铜排下料明细、钻孔清单、标准件汇总与螺栓明细。
+职责：把完整的 `BusbarManufacturingPlan` 转换成生产和加工所需的 Excel 报表，不依赖 SolidWorks 实体。它生成漏保选型、铜排汇总、逐根铜排下料明细、钻孔清单、标准件汇总与螺栓明细。
 
 | 类/函数 | 作用 |
 | --- | --- |
@@ -582,7 +588,7 @@
 | 端口孔径、端部裕度 | `Rules/ManualBusbarRuleSet.cs`、`Planning/BusbarPlanBuilder.cs` |
 | 搭接孔型、孔数、孔径、偏移 | `Rules/BusbarOverlapRuleMatrix.cs`、`Planning/BusbarOverlapHolePlanner.cs` |
 | 直双孔方向判断 | `Planning/BusbarDirectionResolver.cs` |
-| 刀熔/漏保识别规则 | `Planning/BusbarPlanBuilder.cs` 的 `FindFuseComponent`、`FindLoubaoGroups` |
+| 刀熔/漏保识别规则 | `App/AssemblySnapshotFactory.cs` |
 | 汇流排位置和长度 | `Planning/CollectorLayoutPlanner.cs` |
 | 生成前规则预检与控制台报告 | `Planning/BusbarPreflightValidator.cs` |
 | 生成后实体、孔深度、双排表面贴合校验 | `SolidWorks/BusbarGeometryVerifier.cs` |
@@ -595,4 +601,4 @@
 | 保存和插回装配体 | `SolidWorks/PartPersistenceService.cs` |
 | 接 Excel 数据层 | 后续新增 `Data/ExcelDataRepository.cs` |
 | 接 UI | 后续新增 `GenerationRequest` / `GenerationOptions`，UI 填请求对象 |
-| 支持 UG/NXOpen | 保持 `Domain/Rules/Planning` 不依赖 CAD；等第二后端真实接入时，从 `BusbarPlan` 提取两个后端共同需要的最小生成契约 |
+| 支持 UG/NXOpen | 保持 `Domain/Rules/Planning` 不依赖 CAD；等第二后端真实接入时，从 `BusbarManufacturingPlan` 提取两个后端共同需要的最小生成契约 |

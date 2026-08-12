@@ -4,12 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 
 using BusbarAutomation.Core.Domain;
+using BusbarAutomation.Core.Planning;
 
 namespace BusbarAutomation.Cad.SolidWorks
 {
     internal sealed partial class SolidWorksBusbarPartBuilder
     {
-        public void CreateBusbarPreviewPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarPlan plan)
+        public void CreateBusbarPreviewPart(SldWorks swApp, ModelDoc2 assemblyModel, AssemblyDoc assembly, BusbarManufacturingPlan plan)
         {
             if (plan == null)
                 throw new Exception("Busbar preview plan is null.");
@@ -48,7 +49,7 @@ namespace BusbarAutomation.Cad.SolidWorks
             Console.WriteLine("  *_SheetMetal sketches = current sheet-metal sketch paths with end margins.");
         }
 
-        private static void CreateBusbarPreviewSketches(ModelDoc2 partModel, BusbarPlan plan)
+        private static void CreateBusbarPreviewSketches(ModelDoc2 partModel, BusbarManufacturingPlan plan)
         {
             foreach (CollectorLayout collector in plan.Collectors)
             {

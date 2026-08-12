@@ -13,19 +13,21 @@ SolidWorksGenerationRunner 进入 SW 生成主线
 ↓
 扫描装配体和组件参考点
 ↓
-提取连接点 FoundPoint
+提取连接点 FoundPoint，并标准化为 AssemblySnapshot
 ↓
-识别刀熔和漏保
+AssemblySnapshotFactory 识别刀熔、漏保和额定电流
 ↓
 ManualPortRuleProvider 创建 ConnectionPort
 ↓
 CollectorLayoutPlanner 确定汇流排位置和长度
 ↓
-BusbarPlanBuilder 生成连接关系
+BusbarPlanBuilder 生成 BusbarDesignPlan
 ↓
 BusbarRoutePlanner 路径规划
 ↓
-ContactTopologyResolver 应用端部裕度和厚度过渡策略
+BusbarManufacturingPlanner 生成制造计划
+↓
+ContactTopologyResolver 应用端部裕度和厚度过渡策略，并生成钣金草图线
 ↓
 BusbarPreflightValidator 生成前预检
 ↓
@@ -49,14 +51,14 @@ MountingHoleBuilder 孔切除
 | 装配体读取 | SolidWorks 会话 | `ModelDoc2`、`AssemblyDoc` | `SolidWorks/SolidWorksSession.cs` |
 | 扫描阶段 | 装配体、组件 Transform | `FoundPoint` | `SolidWorks/AssemblyScanner.cs` |
 | 点位提取 | `RefPoint` | 装配体坐标 `Point3` | `AssemblyScanner.TransformPoint` |
-| 设备识别 | 所有 `FoundPoint` | 刀熔组件、漏保组 | `Planning/BusbarPlanBuilder.cs` |
+| 输入标准化 | 所有 `FoundPoint`、支持的电流规格 | `AssemblySnapshot` | `App/AssemblySnapshotFactory.cs` |
 | 端口生成 | 命名点、手动规则 | `ConnectionPort` | `Rules/ManualPortRuleProvider.cs` |
 | 汇流排布局 | 端口、相序、设置 | `CollectorLayout` | `Planning/CollectorLayoutPlanner.cs` |
-| 长度控制 | 所有搭接端口范围 | 汇流排 StartX/EndX | `BusbarLengthController.Calculate` |
 | 连接关系 | 设备端口、汇流排 Tap | `Busbar` | `BusbarPlanBuilder.CreateBusbar` |
 | 拓扑判断 | 起终端口连接面 | 同侧/异侧 | `Planning/ContactTopologyResolver.cs` |
 | 补偿计算 | 拓扑、厚度、端部裕度 | 钣金草图线 | `ContactTopologyResolver.CreateSheetMetalSketchLine` |
 | 路径规划 | 起终点和规则 | 逻辑中心线 | `Planning/BusbarRoutePlanner.cs` |
+| 制造规划 | `BusbarDesignPlan`、工程配置快照 | `BusbarManufacturingPlan` | `Planning/BusbarManufacturingPlanner.cs` |
 | 草图生成 | 钣金草图线 | 2D Sketch | `SolidWorks/SheetMetalSketchBuilder.cs` |
 | 钣金生成 | Sketch、宽度、厚度、R、K | Sheet Metal Feature | `SolidWorks/SheetMetalFeatureBuilder.cs` |
 | 打孔 | `MountingPorts` | Cut Feature | `SolidWorks/MountingHoleBuilder.cs` |
@@ -72,15 +74,15 @@ flowchart TD
     B --> C["SolidWorks 装配体"]
     C --> D["AssemblyReferencePointScanner: Scan"]
     D --> E["FoundPoint"]
-    E --> F["BusbarPlanBuilder: 设备识别"]
-    F --> G["ManualPortRuleProvider: ConnectionPort"]
+    E --> F["AssemblySnapshotFactory"]
+    F --> G["AssemblySnapshot / ManualPortRuleProvider"]
     G --> H["CollectorLayoutPlanner"]
-    H --> I["BusbarLengthController"]
-    I --> J["BusbarPlan: MainFeed / Collector / Branch / N"]
-    J --> K["BusbarRoutePlanner"]
-    J --> L["ContactTopologyResolver"]
-    K --> M["LogicalCenterline"]
-    L --> N["SheetMetalSketchLine"]
+    H --> I["BusbarPlanBuilder.BuildDesignPlan"]
+    I --> J["BusbarDesignPlan: MainFeed / Collector / Branch / N"]
+    J --> K["BusbarRoutePlanner: LogicalCenterline"]
+    J --> L["BusbarManufacturingPlanner"]
+    L --> M["ContactTopologyResolver"]
+    M --> N["BusbarManufacturingPlan / SheetMetalSketchLine"]
     N --> O["SheetMetalSketchBuilder: 2D Open Profile"]
     O --> P["SheetMetalFeatureBuilder: Base Flange MidPlane"]
     P --> Q["MountingHoleBuilder: Hole Cuts"]

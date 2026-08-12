@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 
 using BusbarAutomation.Core.Domain;
+using BusbarAutomation.Core.Planning;
 
 using BusbarAutomation.Core.Rules;
 
@@ -14,7 +15,7 @@ namespace BusbarAutomation.Tests
     {
         private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
 
-        public static string Format(BusbarPlan plan)
+        public static string Format(BusbarManufacturingPlan plan)
         {
             if (plan == null)
                 throw new ArgumentNullException("plan");

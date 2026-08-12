@@ -151,7 +151,7 @@ namespace BusbarAutomation.Core.Planning
         }
 
         public static BusbarPreflightReport ValidatePlan(
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             BusbarSettings settings,
             string[] phaseNames,
             BusbarOverlapRuleCatalog overlapRules)
@@ -325,7 +325,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateLoubaoSelections(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             BusbarSettings settings)
         {
             foreach (LoubaoGroup loubao in plan.Loubaos)
@@ -377,7 +377,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateFastenerJoints(
             BusbarPreflightReport report,
-            BusbarPlan plan)
+            BusbarManufacturingPlan plan)
         {
             if (plan.FastenerJoints == null || plan.FastenerJoints.Count == 0)
             {
@@ -408,7 +408,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateCollectors(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             BusbarSettings settings,
             string[] phaseNames)
         {
@@ -464,7 +464,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateBranchTopology(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             BusbarSettings settings,
             string[] phaseNames)
         {
@@ -501,7 +501,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateExpectedBranchSet(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             string phase,
             int branchIndex,
             BusbarProfile expectedProfile,
@@ -551,7 +551,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateOverlapRulesAndPorts(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             string[] phaseNames,
             BusbarOverlapRuleCatalog overlapRules)
         {
@@ -617,7 +617,7 @@ namespace BusbarAutomation.Core.Planning
 
         private static void ValidateDoubleClampRoutes(
             BusbarPreflightReport report,
-            BusbarPlan plan,
+            BusbarManufacturingPlan plan,
             BusbarSettings settings,
             string[] phaseNames)
         {
@@ -783,17 +783,17 @@ namespace BusbarAutomation.Core.Planning
                 : rules.FirstOrDefault(rule => rule.RatedCurrentA == ratedCurrentA);
         }
 
-        private static CollectorLayout FindCollector(BusbarPlan plan, string phase)
+        private static CollectorLayout FindCollector(BusbarManufacturingPlan plan, string phase)
         {
             return plan.Collectors.FirstOrDefault(collector => SameText(collector.Phase, phase));
         }
 
-        private static Busbar FindBusbar(BusbarPlan plan, string name)
+        private static Busbar FindBusbar(BusbarManufacturingPlan plan, string name)
         {
             return plan.Busbars.FirstOrDefault(busbar => SameText(busbar.Name, name));
         }
 
-        private static IEnumerable<Busbar> GetPrimaryBranchesForPhase(BusbarPlan plan, string phase)
+        private static IEnumerable<Busbar> GetPrimaryBranchesForPhase(BusbarManufacturingPlan plan, string phase)
         {
             string prefix = "Busbar_" + phase + "_Branch_";
             return plan.Busbars.Where(busbar =>
@@ -803,7 +803,7 @@ namespace BusbarAutomation.Core.Planning
                 busbar.BranchLegRole != BranchLegRole.Upper);
         }
 
-        private static IEnumerable<Busbar> GetBranchesForPhase(BusbarPlan plan, string phase)
+        private static IEnumerable<Busbar> GetBranchesForPhase(BusbarManufacturingPlan plan, string phase)
         {
             string prefix = "Busbar_" + phase + "_Branch_";
             return plan.Busbars.Where(busbar =>

@@ -7,7 +7,8 @@
 ```text
 解析命令行与校验配置
 -> 扫描 SolidWorks 命名参考点
--> 建立并预检 BusbarPlan
+-> 建立 BusbarDesignPlan
+-> 补齐并预检 BusbarManufacturingPlan
 -> 生成全部铜排文件
 -> 暂存插入并验证实体
 -> 通过后替换旧组件
@@ -24,7 +25,7 @@
 
 ### `Domain`
 
-纯业务对象，不引用 SolidWorks。核心对象是 `Point3`、`ConnectionPort`、`Busbar`、`BusbarPlan`、`BusbarProfile`、`FastenerSpec`。`Point3` 使用米，与 SolidWorks 内部单位一致；工程配置字段明确使用 `Mm` 后缀。
+纯业务对象，不引用 SolidWorks。核心对象是 `Point3`、`ConnectionPort`、`Busbar`、`BusbarProfile`、`FastenerSpec`。计划容器位于 `Planning`：`BusbarDesignPlan` 保存逻辑结果，`BusbarManufacturingPlan` 保存 CAD/报表可消费的制造结果。`Point3` 使用米，与 SolidWorks 内部单位一致；工程配置字段明确使用 `Mm` 后缀。
 
 ### `Rules`
 
@@ -33,7 +34,9 @@
 
 ### `Planning`
 
-- `BusbarPlanBuilder`：识别设备、电流规格和拓扑，汇总完整计划。
+- `AssemblySnapshotFactory`：在输入边界识别设备、电流规格和命名端口。
+- `BusbarPlanBuilder`：建立布局、逻辑路径、拓扑和搭接孔的设计计划。
+- `BusbarManufacturingPlanner`：补齐钣金参数、钣金草图线和螺栓计划。
 - `CollectorLayoutPlanner`：计算汇流排位置、长度和各相独立 X- 外伸。
 - `BusbarRoutePlanner`：生成单排、双排下搭接和外侧上排避让路径。
 - `ContactTopologyResolver`：应用端部裕度和明确的厚度过渡策略。
@@ -43,7 +46,7 @@
 
 ### `Reporting`
 
-`ProductionReportExporter` 从 `BusbarPlan` 导出漏保选型、铜排汇总/明细、钻孔清单、标准件汇总和螺栓明细。它不依赖已生成的 SolidWorks 实体。
+`ProductionReportExporter` 从 `BusbarManufacturingPlan` 导出漏保选型、铜排汇总/明细、钻孔清单、标准件汇总和螺栓明细。它不依赖已生成的 SolidWorks 实体。
 
 ### `SolidWorks`
 

@@ -227,9 +227,10 @@ namespace BusbarAutomation.Tests
         [TestMethod]
         public void ConnectionsInsideCoordinateToleranceShareOneJoint()
         {
-            BusbarPlan plan = new BusbarPlan();
-            plan.Busbars.Add(Branch("Busbar_A_Branch_1_Lower", 0.0));
-            plan.Busbars.Add(Branch("Busbar_A_Branch_1_Upper", 0.000009));
+            BusbarDesignPlan design = new BusbarDesignPlan();
+            design.Busbars.Add(Branch("Busbar_A_Branch_1_Lower", 0.0));
+            design.Busbars.Add(Branch("Busbar_A_Branch_1_Upper", 0.000009));
+            BusbarManufacturingPlan plan = new BusbarManufacturingPlan { Design = design };
             BusbarSettings settings = new BusbarSettings
             {
                 CollectorThicknessMm = 8.0,

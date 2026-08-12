@@ -31,15 +31,28 @@ C#/TopToDown/TopToDown.Tests
 - `Cli`：严格命令行解析；与 `Program.cs` 一起构成当前命令行入口。
 - `Domain`：铜排业务模型、端口、点、规格、孔型、枚举。
 - `Rules`：当前默认规则、端口规则和搭接孔矩阵。
-- `Planning`：从扫描点生成 `BusbarPlan`，包含布局、长度、路径、拓扑补偿、搭接孔位、螺栓计划和预检。
+- `Planning`：从标准化装配快照生成两阶段计划。`BusbarDesignPlan` 保存布局、逻辑路径和搭接孔位；`BusbarManufacturingPlan` 再补齐钣金草图线、钣金参数和螺栓计划。
 - `Domain/AssemblySnapshot.cs`：规划层使用的装配输入快照，包含设备、额定电流、端口和装配坐标。
 - `Domain/EngineeringConfigurationSnapshot.cs`：单次规划使用的工程配置快照，隔离运行期间的配置变更。
 - `Domain/BusbarOverlapRuleCatalog.cs`：单次规划与预检共用的搭接孔规则目录快照。
-- `Reporting`：从 `BusbarPlan` 导出生产与加工清单。
+- `Reporting`：从制造计划导出生产与加工清单，不调用 SolidWorks API。
 - `SolidWorks`：连接 SW、扫描装配体、生成草图/钣金/孔、分阶段替换组件并校验真实实体。
 - `TopToDown.Tests`：不依赖 SolidWorks 的快速自动化测试。
 
 当前仍是一个生产程序集 `TopToDown.exe`。目录现已映射到 `BusbarAutomation.*` 命名空间，用于显式表达依赖并为后续拆分程序集做准备；这不代表已经形成编译隔离。详细说明见 `ARCHITECTURE_MIGRATION_PHASE1.md`。
+
+当前规划主链为：
+
+```text
+AssemblySnapshot
+  -> BusbarPlanBuilder.BuildDesignPlan
+  -> BusbarDesignPlan
+  -> BusbarManufacturingPlanner.Build
+  -> BusbarManufacturingPlan
+  -> 预检 / 报表 / SolidWorks 建模
+```
+
+Phase 3 仍复用同一组 `Busbar` 对象，由制造规划器填入派生的钣金字段，避免复制路径和孔位对象造成两套结果漂移。详细边界、限制和验收记录见 `ARCHITECTURE_MIGRATION_PHASE3.md`。
 
 当前只有 SolidWorks 一个 CAD 后端，未被使用的 `CadAbstractions` 已删除。未来接入 UG/NXOpen 时，应先复用 `Domain/Rules/Planning`，再根据真实的第二后端需求提取最小接口。
 
@@ -56,6 +69,7 @@ C#/TopToDown/TopToDown.Tests
 - `SCRIPT_FUNCTION_GUIDE.md`：各脚本、类、函数作用导览。
 - `GIT_WORKFLOW.md`：Git 工作流说明。
 - `PROJECT_STRUCTURE.md`：项目结构说明。
+- `ARCHITECTURE_MIGRATION_PHASE3.md`：设计计划与制造计划的分离边界、限制和验证记录。
 
 ## `SWtopToDown`
 

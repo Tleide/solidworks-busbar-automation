@@ -28,17 +28,17 @@ C#/TopToDown
    └─ 纯规则与边界测试
 ```
 
-未使用的 `CadAbstractions` 已删除。当前只有 SolidWorks 一个 CAD 后端，提前保留接口不能降低复杂度；以后真正接入 UG/NXOpen 时，再从稳定的 `BusbarPlan` 中提取两个后端共同需要的最小契约。
+未使用的 `CadAbstractions` 已删除。当前只有 SolidWorks 一个 CAD 后端，提前保留接口不能降低复杂度；以后真正接入 UG/NXOpen 时，再从稳定的 `BusbarManufacturingPlan` 中提取两个后端共同需要的最小生成契约。
 
 ## 2. 分层职责
 
 | 层 | 职责 | 依赖 SolidWorks |
 | --- | --- | --- |
 | `Program` / `App` | 默认参数、命令行解析、进程退出码、异常边界 | 否 |
-| `Domain` | 点、端口、铜排、规格、计划、标准件等业务对象 | 否 |
+| `Domain` | 点、端口、铜排、规格、孔和标准件等业务对象 | 否 |
 | `Rules` | 端口规则、搭接孔矩阵、当前手动规则 | 否 |
-| `Planning` | 设备识别、布局、路径、拓扑、孔位、预检、螺栓计划 | 否 |
-| `Reporting` | 从 `BusbarPlan` 导出生产与加工报表 | 否 |
+| `Planning` | 设计计划、制造计划、布局、路径、拓扑、孔位、预检和螺栓计划 | 否 |
+| `Reporting` | 从 `BusbarManufacturingPlan` 导出生产与加工报表 | 否 |
 | `SolidWorks` | 扫描装配、生成钣金、打孔、保存、插入、实体校验 | 是 |
 
 依赖方向：
@@ -47,7 +47,9 @@ C#/TopToDown
 Program
   -> SolidWorksGenerationRunner
       -> AssemblyReferencePointScanner
-      -> BusbarPlanBuilder -> Rules / Domain
+      -> AssemblySnapshotFactory
+      -> BusbarPlanBuilder.BuildDesignPlan -> Rules / Domain
+      -> BusbarManufacturingPlanner.Build
       -> BusbarPreflightValidator
       -> SolidWorksBusbarPartBuilder
       -> BusbarGeometryVerifier
@@ -62,7 +64,8 @@ Program
 严格解析命令行
 -> 校验配置
 -> 连接并扫描当前 SolidWorks 装配体
--> 建立 BusbarPlan
+-> 建立 BusbarDesignPlan
+-> 补齐 BusbarManufacturingPlan
 -> 生成前预检
 -> 生成本轮全部零件文件
 -> 临时插入新组件
@@ -83,6 +86,7 @@ Program
 - 实体校验不仅读取切除特征深度，还匹配实际圆柱面并检查孔沿厚度方向的物理跨度。
 - 双排下排通过 `BranchLegRole.Lower` 表达，不再依赖文件名推断业务语义。
 - `Point3` 明确使用 SolidWorks 的米制内部单位；面向工程师的配置继续使用 `Mm` 后缀。
+- 逻辑布局、路径和搭接孔先进入 `BusbarDesignPlan`；钣金参数、钣金草图线和螺栓选型由 `BusbarManufacturingPlanner` 统一补齐。
 
 ## 5. 当前边界
 

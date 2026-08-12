@@ -47,8 +47,8 @@ C#/TopToDown/TopToDown
 
 - `Domain`、`Rules`、`Planning`、`Reporting` 不引用 SolidWorks API。
 - SolidWorks 相关类型集中在 `SolidWorks` 目录。
-- 当前只有一个 SolidWorks 后端，因此不保留未被使用的 CAD 接口。后续真正接入 UG/NXOpen 时，再从已经稳定的 `BusbarPlan` 契约提取最小后端边界。
-- 主调用方向是 `Program -> SolidWorksGenerationRunner -> AssemblyReferencePointScanner / BusbarPlanBuilder / SolidWorksBusbarPartBuilder`。
+- 当前只有一个 SolidWorks 后端，因此不保留未被使用的 CAD 接口。后续真正接入 UG/NXOpen 时，再从已经稳定的 `BusbarManufacturingPlan` 提取两个后端共同需要的最小生成契约。
+- 主调用方向是 `Program -> SolidWorksGenerationRunner -> AssemblyReferencePointScanner -> AssemblySnapshotFactory -> BusbarPlanBuilder.BuildDesignPlan -> BusbarManufacturingPlanner.Build -> 预检/报表/SolidWorks 建模`。
 
 ## 运行方式
 

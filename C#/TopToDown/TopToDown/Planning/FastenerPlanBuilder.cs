@@ -10,7 +10,7 @@ namespace BusbarAutomation.Core.Planning
     {
         private const double CoordinateToleranceMm = 0.01;
 
-        public static void BuildCollectorJoints(BusbarPlan plan, BusbarSettings settings)
+        public static void BuildCollectorJoints(BusbarManufacturingPlan plan, BusbarSettings settings)
         {
             if (plan == null || settings == null)
                 return;

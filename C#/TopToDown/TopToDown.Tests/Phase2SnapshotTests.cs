@@ -56,7 +56,8 @@ namespace BusbarAutomation.Tests
                 RepresentativeAssemblyFixture.CreatePoints(),
                 PhaseNames,
                 snapshot.GetSupportedRatedCurrents());
-            BusbarPlan plan = BusbarPlanBuilder.BuildPlan(assembly, PhaseNames, snapshot);
+            BusbarDesignPlan design = BusbarPlanBuilder.BuildDesignPlan(assembly, PhaseNames, snapshot);
+            BusbarManufacturingPlan plan = BusbarManufacturingPlanner.Build(design, snapshot);
 
             Assert.AreEqual(28, plan.Busbars.Count);
             Assert.IsTrue(plan.Loubaos
@@ -89,7 +90,7 @@ namespace BusbarAutomation.Tests
                 parsed.Fuse,
                 renamedBreakers);
 
-            BusbarPlan plan = BusbarPlanBuilder.BuildPlan(normalized, PhaseNames, configuration);
+            BusbarDesignPlan plan = BusbarPlanBuilder.BuildDesignPlan(normalized, PhaseNames, configuration);
 
             CollectionAssert.AreEqual(
                 new[] { 630, 400, 400 },

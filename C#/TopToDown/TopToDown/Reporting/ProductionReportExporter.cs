@@ -8,6 +8,7 @@ using System.Text;
 using System.Xml;
 
 using BusbarAutomation.Core.Domain;
+using BusbarAutomation.Core.Planning;
 
 namespace BusbarAutomation.Reporting
 {
@@ -17,7 +18,7 @@ namespace BusbarAutomation.Reporting
     {
         private const double DirectionTolerance = 0.000001;
 
-        public static string Export(BusbarPlan plan, string outputDirectory)
+        public static string Export(BusbarManufacturingPlan plan, string outputDirectory)
         {
             if (plan == null)
                 throw new ArgumentNullException("plan");
@@ -54,7 +55,7 @@ namespace BusbarAutomation.Reporting
             return outputPath;
         }
 
-        private static ProductionReportSheet BuildReadmeSheet(BusbarPlan plan, List<BusbarReportItem> busbars)
+        private static ProductionReportSheet BuildReadmeSheet(BusbarManufacturingPlan plan, List<BusbarReportItem> busbars)
         {
             int holeCount = busbars.Sum(item => item.HoleCount);
             int bendCount = busbars.Sum(item => item.RouteMetrics.BendCount);
